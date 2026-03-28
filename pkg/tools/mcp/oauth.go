@@ -161,11 +161,10 @@ func resourceMetadataFromWWWAuth(wwwAuth string) string {
 type oauthTransport struct {
 	base http.RoundTripper
 	// TODO(rumpl): remove client reference, we need to find a better way to send elicitation requests
-	client      *remoteMCPClient
-	tokenStore  OAuthTokenStore
-	baseURL     string
-	managed     bool
-	oauthConfig *RemoteOAuthConfig
+	client     *remoteMCPClient
+	tokenStore OAuthTokenStore
+	baseURL    string
+	managed    bool
 }
 
 func (t *oauthTransport) RoundTrip(req *http.Request) (*http.Response, error) {
@@ -266,11 +265,6 @@ func (t *oauthTransport) handleManagedOAuthFlow(ctx context.Context, authServer,
 		}
 	}()
 
-	// Use explicit callback port if configured
-	if t.oauthConfig != nil && t.oauthConfig.CallbackPort > 0 {
-		callbackServer.SetPort(t.oauthConfig.CallbackPort)
-	}
-
 	if err := callbackServer.Start(); err != nil {
 		return fmt.Errorf("failed to start callback server: %w", err)
 	}
@@ -281,22 +275,17 @@ func (t *oauthTransport) handleManagedOAuthFlow(ctx context.Context, authServer,
 	var clientID string
 	var clientSecret string
 
-	// Use explicit OAuth credentials if provided, otherwise attempt dynamic registration
-	if t.oauthConfig != nil && t.oauthConfig.ClientID != "" {
-		slog.Debug("Using explicit OAuth client ID from configuration")
-		clientID = t.oauthConfig.ClientID
-		clientSecret = t.oauthConfig.ClientSecret
-	} else if authServerMetadata.RegistrationEndpoint != "" {
+	if authServerMetadata.RegistrationEndpoint != "" {
 		slog.Debug("Attempting dynamic client registration")
-		clientID, clientSecret, err = RegisterClient(ctx, authServerMetadata, redirectURI, t.oauthConfig.Scopes)
+		clientID, clientSecret, err = RegisterClient(ctx, authServerMetadata, redirectURI, nil)
 		if err != nil {
 			slog.Debug("Dynamic registration failed", "error", err)
-			// If explicit client ID was not provided and registration failed, return error
-			return fmt.Errorf("dynamic client registration failed and no explicit client ID provided: %w", err)
+			// TODO(rumpl): fall back to requesting client ID from user
+			return err
 		}
 	} else {
-		// No dynamic registration support and no explicit credentials
-		return errors.New("authorization server does not support dynamic client registration and no explicit OAuth credentials provided")
+		// TODO(rumpl): fall back to requesting client ID from user
+		return errors.New("authorization server does not support dynamic client registration")
 	}
 
 	state, err := GenerateState()
@@ -307,12 +296,6 @@ func (t *oauthTransport) handleManagedOAuthFlow(ctx context.Context, authServer,
 	callbackServer.SetExpectedState(state)
 	verifier := GeneratePKCEVerifier()
 
-	// Use explicit scopes if provided, otherwise use server defaults
-	scopes := authServerMetadata.ScopesSupported
-	if t.oauthConfig != nil && len(t.oauthConfig.Scopes) > 0 {
-		scopes = t.oauthConfig.Scopes
-	}
-
 	authURL := BuildAuthorizationURL(
 		authServerMetadata.AuthorizationEndpoint,
 		clientID,
@@ -320,7 +303,6 @@ func (t *oauthTransport) handleManagedOAuthFlow(ctx context.Context, authServer,
 		state,
 		oauth2.S256ChallengeFromVerifier(verifier),
 		t.baseURL,
-		scopes,
 	)
 
 	result, err := t.client.requestElicitation(ctx, &mcpsdk.ElicitParams{
