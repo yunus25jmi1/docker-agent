@@ -261,6 +261,13 @@ func (r *LocalRuntime) executeToolWithHandler(
 
 	telemetry.RecordToolCall(ctx, toolCall.Function.Name, sess.ID, a.Name(), duration, err)
 
+	// Record audit trail for tool call
+	if r.audit != nil {
+		if _, auditErr := r.audit.RecordToolCall(ctx, sess, a.Name(), toolCall, res, duration); auditErr != nil {
+			slog.Warn("Failed to record audit trail for tool call", "tool", toolCall.Function.Name, "error", auditErr)
+		}
+	}
+
 	if err != nil {
 		if errors.Is(err, context.Canceled) || errors.Is(ctx.Err(), context.Canceled) {
 			slog.Debug("Tool handler canceled by context", "tool", toolCall.Function.Name, "agent", a.Name(), "session_id", sess.ID)

@@ -27,6 +27,7 @@ type Config struct {
 	RAG         map[string]RAGConfig      `json:"rag,omitempty"`
 	Metadata    Metadata                  `json:"metadata"`
 	Permissions *PermissionsConfig        `json:"permissions,omitempty"`
+	Audit       *AuditConfig              `json:"audit,omitempty"`
 }
 
 // MCPToolset is a reusable MCP server definition stored in the top-level
@@ -1292,6 +1293,62 @@ type PermissionsConfig struct {
 	Ask []string `json:"ask,omitempty"`
 	// Deny lists tool name patterns that are always rejected
 	Deny []string `json:"deny,omitempty"`
+}
+
+// AuditConfig represents audit trail configuration for governance and compliance.
+// When enabled, all agent actions (tool calls, file operations, HTTP requests, etc.)
+// are recorded with cryptographic signatures for tamper-proof audit trails.
+type AuditConfig struct {
+	// Enabled enables audit trail recording
+	Enabled bool `json:"enabled,omitempty"`
+	// StoragePath is the directory to store audit records (default: data dir)
+	StoragePath string `json:"storage_path,omitempty"`
+	// KeyPath is the path to the signing key file (default: storage_path/audit_key)
+	KeyPath string `json:"key_path,omitempty"`
+	// RecordToolCalls enables recording of tool calls (default: true if enabled)
+	RecordToolCalls *bool `json:"record_tool_calls,omitempty"`
+	// RecordFileOps enables recording of file operations (default: true if enabled)
+	RecordFileOps *bool `json:"record_file_ops,omitempty"`
+	// RecordHTTP enables recording of HTTP requests (default: true if enabled)
+	RecordHTTP *bool `json:"record_http,omitempty"`
+	// RecordCommands enables recording of command executions (default: true if enabled)
+	RecordCommands *bool `json:"record_commands,omitempty"`
+	// RecordSessions enables recording of session start/end events (default: true if enabled)
+	RecordSessions *bool `json:"record_sessions,omitempty"`
+	// IncludeInputContent includes user input content in audit records (default: false)
+	IncludeInputContent bool `json:"include_input_content,omitempty"`
+	// IncludeOutputContent includes tool output content in audit records (default: false)
+	IncludeOutputContent bool `json:"include_output_content,omitempty"`
+}
+
+// IsEnabled returns true if auditing is enabled
+func (c *AuditConfig) IsEnabled() bool {
+	return c != nil && c.Enabled
+}
+
+// ShouldRecordToolCalls returns true if tool calls should be recorded
+func (c *AuditConfig) ShouldRecordToolCalls() bool {
+	return c.IsEnabled() && (c.RecordToolCalls == nil || *c.RecordToolCalls)
+}
+
+// ShouldRecordFileOps returns true if file operations should be recorded
+func (c *AuditConfig) ShouldRecordFileOps() bool {
+	return c.IsEnabled() && (c.RecordFileOps == nil || *c.RecordFileOps)
+}
+
+// ShouldRecordHTTP returns true if HTTP requests should be recorded
+func (c *AuditConfig) ShouldRecordHTTP() bool {
+	return c.IsEnabled() && (c.RecordHTTP == nil || *c.RecordHTTP)
+}
+
+// ShouldRecordCommands returns true if commands should be recorded
+func (c *AuditConfig) ShouldRecordCommands() bool {
+	return c.IsEnabled() && (c.RecordCommands == nil || *c.RecordCommands)
+}
+
+// ShouldRecordSessions returns true if session events should be recorded
+func (c *AuditConfig) ShouldRecordSessions() bool {
+	return c.IsEnabled() && (c.RecordSessions == nil || *c.RecordSessions)
 }
 
 // HooksConfig represents the hooks configuration for an agent.

@@ -253,7 +253,7 @@ func (f *runExecFlags) runOrExec(ctx context.Context, out *cli.Printer, args []s
 		return err
 	}
 
-	rt, sess, err := f.createLocalRuntimeAndSession(ctx, loadResult)
+	rt, sess, err := f.createLocalRuntimeAndSession(ctx, loadResult, agentFileName)
 	if err != nil {
 		return err
 	}
@@ -336,7 +336,7 @@ func (f *runExecFlags) createRemoteRuntimeAndSession(ctx context.Context, origin
 	return remoteRt, sess, nil
 }
 
-func (f *runExecFlags) createLocalRuntimeAndSession(ctx context.Context, loadResult *teamloader.LoadResult) (runtime.Runtime, *session.Session, error) {
+func (f *runExecFlags) createLocalRuntimeAndSession(ctx context.Context, loadResult *teamloader.LoadResult, agentFileName string) (runtime.Runtime, *session.Session, error) {
 	t := loadResult.Team
 
 	agent, err := t.Agent(f.agentName)
@@ -364,11 +364,22 @@ func (f *runExecFlags) createLocalRuntimeAndSession(ctx context.Context, loadRes
 		AgentDefaultModels: loadResult.AgentDefaultModels,
 	}
 
+	// Load the agent config to get audit configuration
+	agentSource, err := config.Resolve(agentFileName, f.runConfig.EnvProvider())
+	if err != nil {
+		return nil, nil, fmt.Errorf("resolving agent config: %w", err)
+	}
+	agentCfg, err := config.Load(ctx, agentSource)
+	if err != nil {
+		return nil, nil, fmt.Errorf("loading agent config: %w", err)
+	}
+
 	localRt, err := runtime.New(t,
 		runtime.WithSessionStore(sessStore),
 		runtime.WithCurrentAgent(f.agentName),
 		runtime.WithTracer(otel.Tracer(AppName)),
 		runtime.WithModelSwitcherConfig(modelSwitcherCfg),
+		runtime.WithAudit(agentCfg.Audit),
 	)
 	if err != nil {
 		return nil, nil, fmt.Errorf("creating runtime: %w", err)

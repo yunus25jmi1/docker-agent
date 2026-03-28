@@ -55,6 +55,13 @@ func (r *LocalRuntime) finalizeEventChannel(ctx context.Context, sess *session.S
 
 	a := r.resolveSessionAgent(sess)
 
+	// Record audit trail for session end
+	if r.audit != nil {
+		if _, auditErr := r.audit.RecordSessionEnd(context.WithoutCancel(ctx), sess, a.Name(), "completed"); auditErr != nil {
+			slog.Warn("Failed to record audit trail for session end", "session_id", sess.ID, "error", auditErr)
+		}
+	}
+
 	// Execute session end hooks with a context that won't be cancelled so
 	// cleanup hooks run even when the stream was interrupted (e.g. Ctrl+C).
 	r.executeSessionEndHooks(context.WithoutCancel(ctx), sess, a)
@@ -77,6 +84,14 @@ func (r *LocalRuntime) RunStream(ctx context.Context, sess *session.Session) <-c
 
 	go func() {
 		telemetry.RecordSessionStart(ctx, r.CurrentAgentName(), sess.ID)
+
+		// Record audit trail for session start
+		if r.audit != nil {
+			a := r.resolveSessionAgent(sess)
+			if _, auditErr := r.audit.RecordSessionStart(ctx, sess, a.Name()); auditErr != nil {
+				slog.Warn("Failed to record audit trail for session start", "session_id", sess.ID, "error", auditErr)
+			}
+		}
 
 		ctx, sessionSpan := r.startSpan(ctx, "runtime.session", trace.WithAttributes(
 			attribute.String("agent", r.CurrentAgentName()),

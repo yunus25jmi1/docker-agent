@@ -15,6 +15,8 @@ import (
 	"go.opentelemetry.io/otel/trace"
 
 	"github.com/docker/docker-agent/pkg/agent"
+	"github.com/docker/docker-agent/pkg/audit"
+	"github.com/docker/docker-agent/pkg/config/latest"
 	"github.com/docker/docker-agent/pkg/config/types"
 	"github.com/docker/docker-agent/pkg/hooks"
 	"github.com/docker/docker-agent/pkg/modelsdev"
@@ -214,6 +216,9 @@ type LocalRuntime struct {
 	onToolsChanged func(Event)
 
 	bgAgents *agenttool.Handler
+
+	// audit is the audit trail recorder (nil if auditing is disabled)
+	audit *audit.Auditor
 }
 
 type Opt func(*LocalRuntime)
@@ -266,6 +271,29 @@ func WithWorkingDir(dir string) Opt {
 func WithEnv(env []string) Opt {
 	return func(r *LocalRuntime) {
 		r.env = env
+	}
+}
+
+// WithAudit configures audit trail recording for the runtime.
+// If cfg is nil or cfg.Enabled is false, auditing is disabled.
+func WithAudit(cfg *latest.AuditConfig) Opt {
+	return func(r *LocalRuntime) {
+		if cfg == nil || !cfg.IsEnabled() {
+			r.audit = nil
+			return
+		}
+
+		auditor, err := audit.New(audit.Config{
+			Enabled:     cfg.IsEnabled(),
+			StoragePath: cfg.StoragePath,
+			KeyPath:     cfg.KeyPath,
+		})
+		if err != nil {
+			slog.Warn("Failed to initialize audit auditor, disabling auditing", "error", err)
+			r.audit = nil
+			return
+		}
+		r.audit = auditor
 	}
 }
 
@@ -855,6 +883,11 @@ func (r *LocalRuntime) SessionStore() session.Store {
 // Close releases resources held by the runtime, including the session store.
 func (r *LocalRuntime) Close() error {
 	r.bgAgents.StopAll()
+	if r.audit != nil {
+		if err := r.audit.Close(); err != nil {
+			slog.Warn("Failed to close audit auditor", "error", err)
+		}
+	}
 	if r.sessionStore != nil {
 		return r.sessionStore.Close()
 	}

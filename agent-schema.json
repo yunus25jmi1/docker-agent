@@ -71,6 +71,10 @@
     "permissions": {
       "$ref": "#/definitions/PermissionsConfig",
       "description": "Tool permission configuration for controlling tool approval behavior"
+    },
+    "audit": {
+      "$ref": "#/definitions/AuditConfig",
+      "description": "Audit trail configuration for governance and compliance. When enabled, all agent actions are recorded with cryptographic signatures for tamper-proof audit trails."
     }
   },
   "additionalProperties": false,
@@ -711,6 +715,69 @@
               "mcp:github:delete_*"
             ]
           ]
+        }
+      },
+      "additionalProperties": false
+    },
+    "AuditConfig": {
+      "type": "object",
+      "description": "Audit trail configuration for governance and compliance. When enabled, all agent actions (tool calls, file operations, HTTP requests, etc.) are recorded with cryptographic signatures for tamper-proof audit trails.",
+      "properties": {
+        "enabled": {
+          "type": "boolean",
+          "description": "Enable audit trail recording",
+          "default": false
+        },
+        "storage_path": {
+          "type": "string",
+          "description": "Directory to store audit records (default: data dir)",
+          "examples": [
+            "/var/log/docker-agent/audit",
+            "./audit-logs"
+          ]
+        },
+        "key_path": {
+          "type": "string",
+          "description": "Path to the signing key file (default: storage_path/audit_key)",
+          "examples": [
+            "/secure/keys/audit-key.pem",
+            "./audit-key"
+          ]
+        },
+        "record_tool_calls": {
+          "type": "boolean",
+          "description": "Record tool calls (default: true if enabled)",
+          "default": true
+        },
+        "record_file_ops": {
+          "type": "boolean",
+          "description": "Record file operations (default: true if enabled)",
+          "default": true
+        },
+        "record_http": {
+          "type": "boolean",
+          "description": "Record HTTP requests (default: true if enabled)",
+          "default": true
+        },
+        "record_commands": {
+          "type": "boolean",
+          "description": "Record command executions (default: true if enabled)",
+          "default": true
+        },
+        "record_sessions": {
+          "type": "boolean",
+          "description": "Record session start/end events (default: true if enabled)",
+          "default": true
+        },
+        "include_input_content": {
+          "type": "boolean",
+          "description": "Include user input content in audit records (default: false)",
+          "default": false
+        },
+        "include_output_content": {
+          "type": "boolean",
+          "description": "Include tool output content in audit records (default: false)",
+          "default": false
         }
       },
       "additionalProperties": false

@@ -1,0 +1,60 @@
+# Example Docker Agent configuration with audit trail enabled
+# This demonstrates the governance and audit trail feature for compliance
+
+metadata:
+  author: "Your Name"
+  description: "Agent with cryptographic audit trails for compliance"
+  version: "1.0.0"
+
+# Audit trail configuration for governance and compliance
+audit:
+  # Enable audit trail recording
+  enabled: true
+  
+  # Directory to store audit records (default: ~/.cagent/audit)
+  storage_path: "./audit-logs"
+  
+  # Path to the signing key file (auto-generated if not exists)
+  key_path: "./audit-key"
+  
+  # What to record (all true by default when enabled)
+  record_tool_calls: true
+  record_file_ops: true
+  record_http: true
+  record_commands: true
+  record_sessions: true
+  
+  # Content recording (false by default for privacy)
+  include_input_content: false
+  include_output_content: false
+
+models:
+  default:
+    provider: openai
+    model: gpt-4o
+
+agents:
+  compliant-agent:
+    model: default
+    description: "An agent with full audit trail for compliance"
+    instruction: |
+      You are a helpful assistant with full audit trail recording.
+      All your actions are cryptographically signed and tamper-proof.
+    toolsets:
+      - type: filesystem
+      - type: shell
+      - type: fetch
+
+# Each audit record contains:
+# - Unique ID and timestamp
+# - Action type (tool_call, file_read, file_write, http_request, etc.)
+# - Session ID and agent name
+# - Action details
+# - Result (success/failure, output, duration)
+# - Cryptographic hash of the record
+# - Ed25519 signature for tamper-proof verification
+# - Hash of previous record (chain integrity)
+#
+# Audit records are stored as JSON files in the storage_path directory,
+# organized by session ID. Each record can be independently verified
+# using the public key.
