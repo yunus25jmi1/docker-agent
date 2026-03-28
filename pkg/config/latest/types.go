@@ -624,9 +624,26 @@ func (t *Toolset) UnmarshalYAML(unmarshal func(any) error) error {
 }
 
 type Remote struct {
-	URL           string            `json:"url"`
-	TransportType string            `json:"transport_type,omitempty"`
-	Headers       map[string]string `json:"headers,omitempty"`
+	URL           string             `json:"url"`
+	TransportType string             `json:"transport_type,omitempty"`
+	Headers       map[string]string  `json:"headers,omitempty"`
+	OAuth         *RemoteOAuthConfig `json:"oauth,omitempty"`
+}
+
+// RemoteOAuthConfig represents explicit OAuth configuration for remote MCP servers.
+// This allows using pre-registered OAuth clients with servers that do not support
+// Dynamic Client Registration (RFC 7591), such as the Slack MCP server.
+type RemoteOAuthConfig struct {
+	// ClientID is the OAuth client ID (required for explicit OAuth)
+	ClientID string `json:"clientId,omitempty" yaml:"clientId,omitempty"`
+	// ClientSecret is the OAuth client secret (optional, for confidential clients)
+	ClientSecret string `json:"clientSecret,omitempty" yaml:"clientSecret,omitempty"`
+	// CallbackPort is the fixed port for the OAuth callback server (optional)
+	// When not specified, a random available port is used
+	CallbackPort int `json:"callbackPort,omitempty" yaml:"callbackPort,omitempty"`
+	// Scopes is the list of OAuth scopes to request (optional)
+	// When not specified, default scopes from the server are used
+	Scopes []string `json:"scopes,omitempty" yaml:"scopes,omitempty"`
 }
 
 // DeferConfig represents the deferred loading configuration for a toolset.
