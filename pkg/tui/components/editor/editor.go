@@ -638,7 +638,8 @@ func (e *editor) Update(msg tea.Msg) (layout.Model, tea.Cmd) {
 		return e, cmd
 
 	case completion.SelectedMsg:
-		// If the item has an Execute function, run it instead of inserting text
+		// Rule 1: Action items (like "Browse files...") ALWAYS execute, regardless of Tab/Enter
+		// Execute takes precedence over everything else - it's an action, not text insertion
 		if msg.Execute != nil {
 			// Remove the trigger character and any typed completion word from the textarea
 			// before executing. For example, typing "@" then selecting "Browse files..."
@@ -654,7 +655,16 @@ func (e *editor) Update(msg tea.Msg) (layout.Model, tea.Cmd) {
 			e.clearSuggestion()
 			return e, msg.Execute()
 		}
-		if e.currentCompletion.AutoSubmit() {
+
+		// Rule 2: No value and no Execute = nothing to do (defensive)
+		if msg.Value == "" {
+			e.clearSuggestion()
+			return e, nil
+		}
+
+		// Rule 3: Slash commands (/), only submit on Enter, never on Tab
+		// File attachments (@) NEVER submit - they always just insert text
+		if e.currentCompletion.AutoSubmit() && msg.AutoSubmit {
 			// For auto-submit completions (like commands), use the selected
 			// command value (e.g., "/exit") instead of what the user typed
 			// (e.g., "/e"). Append any extra text after the trigger word
@@ -667,13 +677,22 @@ func (e *editor) Update(msg tea.Msg) (layout.Model, tea.Cmd) {
 			cmd := e.resetAndSend(msg.Value + extraText)
 			return e, cmd
 		}
-		// For non-auto-submit completions (like file paths), replace the completion word
-		currentValue := e.textarea.Value()
-		if lastIdx := strings.LastIndex(currentValue, e.completionWord); lastIdx >= 0 {
-			newValue := currentValue[:lastIdx-1] + msg.Value + " " + currentValue[lastIdx+len(e.completionWord):]
-			e.textarea.SetValue(newValue)
-			e.textarea.MoveToEnd()
+
+		// Rule 4: Normal text insertion - for @ files on both Tab and Enter
+		// This handles: Tab on /command (inserts text), Enter on @file (inserts), Tab on @file (inserts)
+		// Build the active token (e.g., "@", "@rea", "/e")
+		if e.currentCompletion != nil {
+			triggerWord := e.currentCompletion.Trigger() + e.completionWord
+			currentValue := e.textarea.Value()
+			// Replace the trigger word (including trigger char) with the selected value
+			if idx := strings.LastIndex(currentValue, triggerWord); idx >= 0 {
+				// Keep text before the trigger, add selected value, then text after
+				newValue := currentValue[:idx] + msg.Value + " " + currentValue[idx+len(triggerWord):]
+				e.textarea.SetValue(newValue)
+				e.textarea.MoveToEnd()
+			}
 		}
+
 		// Track file references when using @ completion (but not paste placeholders)
 		if e.currentCompletion != nil && e.currentCompletion.Trigger() == "@" && !strings.HasPrefix(msg.Value, "@paste-") {
 			if err := e.addFileAttachment(msg.Value); err != nil {

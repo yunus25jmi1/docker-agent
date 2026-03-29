@@ -52,8 +52,11 @@ type QueryMsg struct {
 }
 
 type SelectedMsg struct {
-	Value   string
-	Execute func() tea.Cmd
+	Value      string
+	Execute    func() tea.Cmd
+	// AutoSubmit is true when Enter was pressed (should auto-submit commands)
+	// false when Tab was pressed (just autocomplete, don't submit)
+	AutoSubmit bool
 }
 
 // SelectionChangedMsg is sent when the selected item changes (for preview in editor)
@@ -88,6 +91,7 @@ type completionKeyMap struct {
 	Up     key.Binding
 	Down   key.Binding
 	Enter  key.Binding
+	Tab    key.Binding
 	Escape key.Binding
 }
 
@@ -103,8 +107,12 @@ func defaultCompletionKeyMap() completionKeyMap {
 			key.WithHelp("↓", "down"),
 		),
 		Enter: key.NewBinding(
-			key.WithKeys("enter", "tab"),
-			key.WithHelp("enter/tab", "select"),
+			key.WithKeys("enter"),
+			key.WithHelp("enter", "select"),
+		),
+		Tab: key.NewBinding(
+			key.WithKeys("tab"),
+			key.WithHelp("tab", "autocomplete"),
 		),
 		Escape: key.NewBinding(
 			key.WithKeys("esc"),
@@ -255,11 +263,28 @@ func (c *manager) Update(msg tea.Msg) (layout.Model, tea.Cmd) {
 			selectedItem := c.filteredItems[c.selected]
 			return c, tea.Sequence(
 				core.CmdHandler(SelectedMsg{
-					Value:   selectedItem.Value,
-					Execute: selectedItem.Execute,
+					Value:      selectedItem.Value,
+					Execute:    selectedItem.Execute,
+					AutoSubmit: true, // Enter pressed - auto-submit commands
 				}),
 				core.CmdHandler(ClosedMsg{}),
 			)
+
+		case key.Matches(msg, c.keyMap.Tab):
+			c.visible = false
+			if len(c.filteredItems) == 0 || c.selected >= len(c.filteredItems) {
+				return c, core.CmdHandler(ClosedMsg{})
+			}
+			selectedItem := c.filteredItems[c.selected]
+			return c, tea.Sequence(
+				core.CmdHandler(SelectedMsg{
+					Value:      selectedItem.Value,
+					Execute:    selectedItem.Execute,
+					AutoSubmit: false, // Tab pressed - just autocomplete, don't submit
+				}),
+				core.CmdHandler(ClosedMsg{}),
+			)
+
 		case key.Matches(msg, c.keyMap.Escape):
 			c.visible = false
 			return c, core.CmdHandler(ClosedMsg{})
