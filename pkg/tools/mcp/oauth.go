@@ -449,8 +449,11 @@ func (t *oauthTransport) handleUnmanagedOAuthFlow(ctx context.Context, authServe
 		return errors.New("access_token missing or invalid in client response")
 	}
 
-	if tokenType, ok := tokenData["token_type"].(string); ok {
+	// token_type is required per OAuth 2.0 RFC 6749
+	if tokenType, ok := tokenData["token_type"].(string); ok && tokenType != "" {
 		token.TokenType = tokenType
+	} else {
+		return errors.New("token_type missing or invalid in client response")
 	}
 
 	if expiresIn, ok := tokenData["expires_in"].(float64); ok {

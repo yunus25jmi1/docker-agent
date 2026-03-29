@@ -106,14 +106,20 @@ func (c *remoteMCPClient) SetManagedOAuth(managed bool) {
 func (c *remoteMCPClient) createHTTPClient() *http.Client {
 	transport := c.headerTransport()
 
+	// Read managed and oauthConfig with lock to prevent data race
+	c.mu.RLock()
+	managed := c.managed
+	oauthConfig := c.oauthConfig
+	c.mu.RUnlock()
+
 	// Then wrap with OAuth support
 	transport = &oauthTransport{
 		base:        transport,
 		client:      c,
 		tokenStore:  c.tokenStore,
 		baseURL:     c.url,
-		managed:     c.managed,
-		oauthConfig: c.oauthConfig,
+		managed:     managed,
+		oauthConfig: oauthConfig,
 	}
 
 	return &http.Client{

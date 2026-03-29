@@ -153,7 +153,7 @@ type ErrorAction struct {
 
 // Auditor handles audit trail recording and verification
 type Auditor struct {
-	mu          sync.Mutex
+	mu          sync.RWMutex
 	privateKey  ed25519.PrivateKey
 	publicKey   ed25519.PublicKey
 	records     []*AuditRecord
@@ -448,10 +448,11 @@ func (a *Auditor) record(ctx context.Context, sess *session.Session, agentName s
 	// Get timestamp
 	timestamp := time.Now().UTC().Format(time.RFC3339Nano)
 
-	// Get previous hash for chain integrity
-	a.mu.Unlock()
-	previousHash := a.getPreviousHash(sess.ID)
-	a.mu.Lock()
+	// Get previous hash for chain integrity (read while holding write lock)
+	var previousHash string
+	if hash, ok := a.sessionHash[sess.ID]; ok {
+		previousHash = hash
+	}
 
 	// Create record
 	record := &AuditRecord{
@@ -486,8 +487,12 @@ func (a *Auditor) record(ctx context.Context, sess *session.Session, agentName s
 	// Store record
 	a.records = append(a.records, record)
 
-	// Persist to disk
-	if err := a.persistRecord(record); err != nil {
+	// Unlock before persisting to disk (I/O operation)
+	a.mu.Unlock()
+	err = a.persistRecord(record)
+	a.mu.Lock()
+
+	if err != nil {
 		return record, fmt.Errorf("failed to persist record: %w", err)
 	}
 
@@ -495,6 +500,8 @@ func (a *Auditor) record(ctx context.Context, sess *session.Session, agentName s
 }
 
 func (a *Auditor) getPreviousHash(sessionID string) string {
+	a.mu.RLock()
+	defer a.mu.RUnlock()
 	if hash, ok := a.sessionHash[sessionID]; ok {
 		return hash
 	}
@@ -534,7 +541,9 @@ func calculateHash(record *AuditRecord) (string, error) {
 
 func generateID() string {
 	b := make([]byte, 16)
-	rand.Read(b)
+	if _, err := rand.Read(b); err != nil {
+		panic(fmt.Sprintf("failed to generate random ID: %v", err))
+	}
 	return hex.EncodeToString(b)
 }
 

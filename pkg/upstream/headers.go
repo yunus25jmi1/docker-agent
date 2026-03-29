@@ -39,6 +39,9 @@ func Handler(next http.Handler) http.Handler {
 // placeholders that are resolved at request time from upstream headers
 // stored in the request context.
 func NewHeaderTransport(base http.RoundTripper, headers map[string]string) http.RoundTripper {
+	if base == nil {
+		base = http.DefaultTransport
+	}
 	return &headerTransport{base: base, headers: headers}
 }
 
