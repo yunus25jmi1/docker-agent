@@ -77,6 +77,7 @@ func (sm *SessionManager) CreateSession(ctx context.Context, sessionTemplate *se
 	opts = append(opts,
 		session.WithMaxIterations(sessionTemplate.MaxIterations),
 		session.WithMaxConsecutiveToolCalls(sessionTemplate.MaxConsecutiveToolCalls),
+		session.WithMaxOldToolCallTokens(sessionTemplate.MaxOldToolCallTokens),
 		session.WithToolsApproved(sessionTemplate.ToolsApproved),
 	)
 
@@ -255,20 +256,6 @@ func (sm *SessionManager) ToggleToolApproval(ctx context.Context, sessionID stri
 	return sm.sessionStore.UpdateSession(ctx, sess)
 }
 
-// ToggleThinking toggles the thinking mode for a session.
-func (sm *SessionManager) ToggleThinking(ctx context.Context, sessionID string) error {
-	sm.mux.Lock()
-	defer sm.mux.Unlock()
-	sess, err := sm.sessionStore.GetSession(ctx, sessionID)
-	if err != nil {
-		return err
-	}
-
-	sess.Thinking = !sess.Thinking
-
-	return sm.sessionStore.UpdateSession(ctx, sess)
-}
-
 // UpdateSessionPermissions updates the permissions for a session.
 func (sm *SessionManager) UpdateSessionPermissions(ctx context.Context, sessionID string, perms *session.PermissionsConfig) error {
 	sm.mux.Lock()
@@ -361,9 +348,7 @@ func (sm *SessionManager) runtimeForSession(ctx context.Context, sess *session.S
 	}
 	sess.MaxIterations = agent.MaxIterations()
 	sess.MaxConsecutiveToolCalls = agent.MaxConsecutiveToolCalls()
-	// Initialize thinking state based on whether thinking_budget was explicitly configured
-	// in the agent's YAML config. Only enable thinking by default when explicitly configured.
-	sess.Thinking = agent.ThinkingConfigured()
+	sess.MaxOldToolCallTokens = agent.MaxOldToolCallTokens()
 
 	opts := []runtime.Opt{
 		runtime.WithCurrentAgent(currentAgent),

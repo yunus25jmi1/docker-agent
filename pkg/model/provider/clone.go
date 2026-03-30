@@ -27,6 +27,9 @@ func CloneWithOptions(ctx context.Context, base Provider, opts ...options.Opt) P
 		if mt := tempOpts.MaxTokens(); mt != 0 {
 			modelConfig.MaxTokens = &mt
 		}
+		if tempOpts.NoThinking() {
+			modelConfig.ThinkingBudget = nil
+		}
 	}
 
 	// Use NewWithModels to support cloning routers that reference other models.

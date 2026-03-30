@@ -10,6 +10,7 @@ import (
 	"io"
 	"iter"
 	"log/slog"
+	"net"
 	"net/url"
 	"strings"
 	"sync"
@@ -58,6 +59,11 @@ type Toolset struct {
 	// toolsChangedHandler is called after the tool cache is refreshed
 	// following a ToolListChanged notification from the server.
 	toolsChangedHandler func()
+
+	// restarted is closed and replaced whenever the connection is
+	// successfully restarted by watchConnection, allowing callers
+	// waiting on a reconnect to be unblocked.
+	restarted chan struct{}
 }
 
 // invalidateCache clears the cached tools and prompts and bumps the
@@ -67,6 +73,10 @@ func (ts *Toolset) invalidateCache() {
 	ts.cachedPrompts = nil
 	ts.cacheGen++
 }
+
+// sessionMissingRetryTimeout is the maximum time to wait for watchConnection
+// to restart the MCP server after an ErrSessionMissing error.
+const sessionMissingRetryTimeout = 35 * time.Second
 
 var (
 	_ tools.ToolSet   = (*Toolset)(nil)
@@ -144,6 +154,8 @@ func (ts *Toolset) Start(ctx context.Context) error {
 	if ts.started {
 		return nil
 	}
+
+	ts.restarted = make(chan struct{})
 
 	if err := ts.doStart(ctx); err != nil {
 		if errors.Is(err, errServerUnavailable) {
@@ -280,6 +292,13 @@ func (ts *Toolset) watchConnection(ctx context.Context) {
 		if !ts.tryRestart(ctx) {
 			return
 		}
+
+		// After a successful restart, eagerly refresh the tool and prompt
+		// caches and notify the runtime so it picks up the new server's
+		// state. The new server may expose a different set of tools/prompts,
+		// and without this the runtime would keep using its stale copy.
+		ts.refreshToolCache(ctx)
+		ts.refreshPromptCache(ctx)
 	}
 }
 
@@ -307,6 +326,9 @@ func (ts *Toolset) tryRestart(ctx context.Context) bool {
 		}
 
 		ts.started = true
+		// Signal anyone waiting for a reconnect.
+		close(ts.restarted)
+		ts.restarted = make(chan struct{})
 		ts.mu.Unlock()
 
 		slog.Info("MCP server restarted successfully", "server", ts.logID)
@@ -360,6 +382,7 @@ func (ts *Toolset) Tools(ctx context.Context) ([]tools.Tool, error) {
 
 		tool := tools.Tool{
 			Name:         name,
+			Category:     "mcp",
 			Description:  t.Description,
 			Parameters:   t.InputSchema,
 			OutputSchema: t.OutputSchema,
@@ -438,6 +461,17 @@ func (ts *Toolset) callTool(ctx context.Context, toolCall tools.ToolCall) (*tool
 	request.Arguments = args
 
 	resp, err := ts.mcpClient.CallTool(ctx, request)
+
+	// If the call failed with a connection or session error (e.g. the
+	// server restarted), trigger or wait for a reconnection and retry
+	// the call once.
+	if err != nil && isConnectionError(err) && ctx.Err() == nil {
+		slog.Warn("MCP call failed, forcing reconnect and retrying", "tool", toolCall.Function.Name, "server", ts.logID, "error", err)
+		if waitErr := ts.forceReconnectAndWait(ctx); waitErr != nil {
+			return nil, fmt.Errorf("failed to reconnect after call failure: %w", waitErr)
+		}
+		resp, err = ts.mcpClient.CallTool(ctx, request)
+	}
 	if err != nil {
 		if errors.Is(err, context.Canceled) || errors.Is(ctx.Err(), context.Canceled) {
 			slog.Debug("CallTool canceled by context", "tool", toolCall.Function.Name)
@@ -451,6 +485,33 @@ func (ts *Toolset) callTool(ctx context.Context, toolCall tools.ToolCall) (*tool
 	slog.Debug("MCP tool call completed", "tool", toolCall.Function.Name, "output_length", len(result.Output))
 	slog.Debug(result.Output)
 	return result, nil
+}
+
+// forceReconnectAndWait closes the current session to trigger watchConnection's
+// restart logic, then waits for the reconnection to complete.
+func (ts *Toolset) forceReconnectAndWait(ctx context.Context) error {
+	ts.mu.Lock()
+	restartCh := ts.restarted
+	alreadyRestarting := !ts.started
+	ts.mu.Unlock()
+
+	if !alreadyRestarting {
+		// Force-close the session so that Wait() returns and watchConnection
+		// kicks in with its restart loop. Skip this if watchConnection has
+		// already detected the disconnect (started==false) to avoid killing
+		// a connection that tryRestart may be establishing concurrently.
+		_ = ts.mcpClient.Close(context.WithoutCancel(ctx))
+	}
+
+	// Wait for watchConnection to complete a successful restart.
+	select {
+	case <-restartCh:
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-time.After(sessionMissingRetryTimeout):
+		return errors.New("timed out waiting for MCP server reconnection")
+	}
 }
 
 func (ts *Toolset) Stop(ctx context.Context) error {
@@ -637,4 +698,28 @@ func (ts *Toolset) GetPrompt(ctx context.Context, name string, arguments map[str
 
 	slog.Debug("Retrieved MCP prompt", "prompt", name, "messages_count", len(result.Messages))
 	return result, nil
+}
+
+// isConnectionError reports whether err is a connection or session error
+// that warrants a reconnect-and-retry (as opposed to an application-level
+// error that would fail again even after reconnecting).
+func isConnectionError(err error) bool {
+	if errors.Is(err, mcp.ErrSessionMissing) || errors.Is(err, io.EOF) {
+		return true
+	}
+	var netErr net.Error
+	if errors.As(err, &netErr) {
+		return true
+	}
+	// The MCP SDK wraps transport failures (e.g. connection reset, EOF from
+	// client.Do) with its internal ErrRejected sentinel using %v, which
+	// drops the original error from the chain.  Detect these by checking
+	// the error message for common transport-failure substrings.
+	if msg := err.Error(); strings.Contains(msg, "connection reset") ||
+		strings.Contains(msg, "connection refused") ||
+		strings.Contains(msg, "broken pipe") ||
+		strings.Contains(msg, "EOF") {
+		return true
+	}
+	return false
 }

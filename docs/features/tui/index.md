@@ -41,7 +41,6 @@ Type `/` during a session to see available commands, or press <kbd>Ctrl</kbd>+<k
 | `/sessions` | Browse and load past sessions                  |
 | `/model`    | Change the model for the current agent         |
 | `/theme`    | Change the color theme                         |
-| `/think`    | Toggle thinking/reasoning mode                 |
 | `/yolo`     | Toggle automatic tool call approval            |
 | `/title`    | Set or regenerate session title                |
 | `/attach`   | Attach a file to your message                  |

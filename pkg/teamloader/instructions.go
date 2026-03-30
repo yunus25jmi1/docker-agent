@@ -19,6 +19,7 @@ func WithInstructions(inner tools.ToolSet, instruction string) tools.ToolSet {
 
 type replaceInstruction struct {
 	tools.ToolSet
+
 	instruction string
 }
 

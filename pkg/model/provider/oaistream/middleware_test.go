@@ -102,6 +102,7 @@ func TestErrorBodyMiddleware(t *testing.T) {
 
 		resp, err := middleware(req, next)
 		require.NoError(t, err)
+		defer resp.Body.Close()
 		assert.Equal(t, http.StatusOK, resp.StatusCode)
 	})
 
@@ -121,6 +122,7 @@ func TestErrorBodyMiddleware(t *testing.T) {
 
 		resp, err := middleware(req, next)
 		require.NoError(t, err)
+		defer resp.Body.Close()
 		assert.Equal(t, http.StatusTooManyRequests, resp.StatusCode)
 
 		body, err := io.ReadAll(resp.Body)
@@ -144,6 +146,7 @@ func TestErrorBodyMiddleware(t *testing.T) {
 
 		resp, err := middleware(req, next)
 		require.NoError(t, err)
+		defer resp.Body.Close()
 		assert.Equal(t, http.StatusTooManyRequests, resp.StatusCode)
 
 		body, err := io.ReadAll(resp.Body)
@@ -167,6 +170,7 @@ func TestErrorBodyMiddleware(t *testing.T) {
 
 		resp, err := middleware(req, next)
 		require.NoError(t, err)
+		defer resp.Body.Close()
 		assert.Equal(t, http.StatusTooManyRequests, resp.StatusCode)
 
 		body, err := io.ReadAll(resp.Body)
@@ -191,6 +195,7 @@ func TestErrorBodyMiddleware(t *testing.T) {
 
 		resp, err := middleware(req, next)
 		require.NoError(t, err)
+		defer resp.Body.Close()
 
 		body, err := io.ReadAll(resp.Body)
 		require.NoError(t, err)

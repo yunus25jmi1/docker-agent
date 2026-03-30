@@ -5,6 +5,8 @@ import (
 	"log/slog"
 	"net/http"
 	"time"
+
+	"github.com/docker/docker-agent/pkg/desktop"
 )
 
 // telemetryLogger wraps slog.Logger to automatically prepend "[Telemetry]" to all messages
@@ -42,7 +44,7 @@ func (tl *telemetryLogger) Enabled(ctx context.Context, level slog.Level) bool {
 	return tl.logger.Enabled(ctx, level)
 }
 
-func newClient(logger *slog.Logger, enabled, debugMode bool, version string, customHTTPClient ...*http.Client) *Client {
+func newClient(ctx context.Context, logger *slog.Logger, enabled, debugMode bool, version string, customHTTPClient ...*http.Client) *Client {
 	telemetryLogger := NewTelemetryLogger(logger)
 
 	if !enabled {
@@ -72,15 +74,16 @@ func newClient(logger *slog.Logger, enabled, debugMode bool, version string, cus
 	}
 
 	client := &Client{
-		logger:     telemetryLogger,
-		userUUID:   getUserUUID(),
-		enabled:    enabled,
-		debugMode:  debugMode,
-		httpClient: httpClient,
-		endpoint:   endpoint,
-		apiKey:     apiKey,
-		header:     header,
-		version:    version,
+		logger:      telemetryLogger,
+		userUUID:    getUserUUID(),
+		desktopUUID: desktop.GetUUID(ctx),
+		enabled:     enabled,
+		debugMode:   debugMode,
+		httpClient:  httpClient,
+		endpoint:    endpoint,
+		apiKey:      apiKey,
+		header:      header,
+		version:     version,
 	}
 
 	telemetryLogger.Debug("Enabled:", enabled)

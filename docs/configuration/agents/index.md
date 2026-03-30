@@ -17,7 +17,7 @@ agents:
     model: string # Required: model reference
     description: string # Required: what this agent does
     instruction: string # Required: system prompt
-    sub_agents: [list] # Optional: sub-agent names
+    sub_agents: [list] # Optional: local or external sub-agent references
     toolsets: [list] # Optional: tool configurations
     rag: [list] # Optional: RAG source references
     fallback: # Optional: fallback config
@@ -30,12 +30,14 @@ agents:
     add_description_parameter: bool # Optional: add description to tool schema
     code_mode_tools: boolean # Optional: enable code mode tool format
     max_iterations: int # Optional: max tool-calling loops
+    max_consecutive_tool_calls: int # Optional: max identical consecutive tool calls
+    max_old_tool_call_tokens: int # Optional: token budget for old tool call content
     num_history_items: int # Optional: limit conversation history
     skills: boolean # Optional: enable skill discovery
     commands: # Optional: named prompts
       name: "prompt text"
     welcome_message: string # Optional: message shown at session start
-    handoffs: [list] # Optional: list of A2A handoff agents
+    handoffs: [list] # Optional: agent names this agent can hand off to
     hooks: # Optional: lifecycle hooks
       pre_tool_use: [list]
       post_tool_use: [list]
@@ -63,7 +65,7 @@ agents:
 | `model`                     | string  | ✓        | Model reference. Either inline (`openai/gpt-4o`) or a named model from the `models` section.                                                                                  |
 | `description`               | string  | ✓        | Brief description of the agent's purpose. Used by coordinators to decide delegation.                                                                                          |
 | `instruction`               | string  | ✓        | System prompt that defines the agent's behavior, personality, and constraints.                                                                                                |
-| `sub_agents`                | array   | ✗        | List of agent names this agent can delegate to. Automatically enables the `transfer_task` tool.                                                                               |
+| `sub_agents`                | array   | ✗        | List of agent names or external OCI references this agent can delegate to. Supports local agents, registry references (e.g., `agentcatalog/pirate`), and named references (`name:reference`). Automatically enables the `transfer_task` tool. See [External Sub-Agents]({{ '/concepts/multi-agent/#external-sub-agents-from-registries' | relative_url }}). |
 | `toolsets`                  | array   | ✗        | List of tool configurations. See [Tool Config]({{ '/configuration/tools/' | relative_url }}).                                                                                                        |
 | `fallback`                  | object  | ✗        | Automatic model failover configuration.                                                                                                                                       |
 | `add_date`                  | boolean | ✗        | When `true`, injects the current date into the agent's context.                                                                                                               |
@@ -72,12 +74,14 @@ agents:
 | `add_description_parameter` | boolean | ✗        | When `true`, adds agent descriptions as a parameter in tool schemas. Helps with tool selection in multi-agent scenarios.                                                      |
 | `code_mode_tools`           | boolean | ✗        | When `true`, formats tool responses in a code-optimized format with structured output schemas. Useful for MCP gateway and programmatic access.                                |
 | `max_iterations`            | int     | ✗        | Maximum number of tool-calling loops. Default: unlimited (0). Set this to prevent infinite loops.                                                                             |
+| `max_consecutive_tool_calls` | int     | ✗        | Maximum consecutive identical tool calls before the agent is terminated, preventing degenerate loops. Default: `5`.                                                          |
+| `max_old_tool_call_tokens`  | int     | ✗        | Maximum number of tokens to keep from old tool call arguments and results. Older tool calls beyond this budget have their content replaced with a placeholder, saving context space. Tokens are approximated as `len/4`. Set to `-1` to disable truncation (unlimited). Default: `40000`. |
 | `num_history_items`         | int     | ✗        | Limit the number of conversation history messages sent to the model. Useful for managing context window size with long conversations. Default: unlimited (all messages sent). |
 | `rag`                       | array   | ✗        | List of RAG source names to attach to this agent. References sources defined in the top-level `rag` section. See [RAG]({{ '/features/rag/' | relative_url }}).                                       |
 | `skills`                    | boolean | ✗        | Enable automatic skill discovery from standard directories.                                                                                                                   |
 | `commands`                  | object  | ✗        | Named prompts that can be run with `docker agent run config.yaml /command_name`.                                                                                              |
 | `welcome_message`           | string  | ✗        | Message displayed to the user when a session starts. Useful for providing context or instructions.                                                                            |
-| `handoffs`                  | array   | ✗        | List of A2A agent configurations this agent can delegate to. See [A2A Protocol]({{ '/features/a2a/' | relative_url }}).                                                                              |
+| `handoffs`                  | array   | ✗        | List of agent names this agent can hand off the conversation to. Enables the `handoff` tool. See [Handoffs Routing]({{ '/concepts/multi-agent/#handoffs-routing' | relative_url }}).                  |
 | `hooks`                     | object  | ✗        | Lifecycle hooks for running commands at various points. See [Hooks]({{ '/configuration/hooks/' | relative_url }}).                                                                                   |
 | `structured_output`         | object  | ✗        | Constrain agent output to match a JSON schema. See [Structured Output]({{ '/configuration/structured-output/' | relative_url }}).                                                                    |
 

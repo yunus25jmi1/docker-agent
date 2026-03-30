@@ -13,32 +13,32 @@ import (
 type EventType string
 
 const (
-	// PreToolUse is triggered before a tool call executes.
+	// EventPreToolUse is triggered before a tool call executes.
 	// Can allow/deny/modify tool calls; can block with feedback.
 	EventPreToolUse EventType = "pre_tool_use"
 
-	// PostToolUse is triggered after a tool completes successfully.
+	// EventPostToolUse is triggered after a tool completes successfully.
 	// Can provide validation, feedback, or additional processing.
 	EventPostToolUse EventType = "post_tool_use"
 
-	// SessionStart is triggered when a session begins or resumes.
+	// EventSessionStart is triggered when a session begins or resumes.
 	// Can load context, setup environment, install dependencies.
 	EventSessionStart EventType = "session_start"
 
-	// SessionEnd is triggered when a session terminates.
+	// EventSessionEnd is triggered when a session terminates.
 	// Can perform cleanup, logging, persist session state.
 	EventSessionEnd EventType = "session_end"
 
-	// OnUserInput is triggered when the agent needs input from the user.
+	// EventOnUserInput is triggered when the agent needs input from the user.
 	// Can log, notify, or perform actions before user interaction.
 	EventOnUserInput EventType = "on_user_input"
 
-	// Stop is triggered when the model finishes its response and is about
+	// EventStop is triggered when the model finishes its response and is about
 	// to hand control back to the user. Can perform post-response validation,
 	// logging, or cleanup.
 	EventStop EventType = "stop"
 
-	// Notification is triggered when the agent emits a notification to the user,
+	// EventNotification is triggered when the agent emits a notification to the user,
 	// such as errors or warnings. Can send external notifications or log events.
 	EventNotification EventType = "notification"
 )

@@ -49,7 +49,6 @@ All endpoints are under the `/api` prefix.
 | `PATCH`  | `/api/sessions/:id/permissions`     | Update session permissions                          |
 | `POST`   | `/api/sessions/:id/resume`          | Resume a paused session (after tool confirmation)   |
 | `POST`   | `/api/sessions/:id/tools/toggle`    | Toggle auto-approve (YOLO) mode                     |
-| `POST`   | `/api/sessions/:id/thinking/toggle` | Toggle thinking/reasoning mode                      |
 | `POST`   | `/api/sessions/:id/elicitation`     | Respond to an MCP tool elicitation request          |
 
 ### Agent Execution
@@ -59,6 +58,34 @@ All endpoints are under the `/api` prefix.
 | `POST` | `/api/sessions/:id/agent/:agent`       | Run the root agent for a session (SSE stream) |
 | `POST` | `/api/sessions/:id/agent/:agent/:name` | Run a specific named agent (SSE stream)       |
 
+**Path parameters:**
+
+- **`:agent`** — The agent identifier, which is the **config filename without the `.yaml` extension**. This must match the filename passed to `docker agent serve api`. For example, if you start the server with `docker agent serve api my-assistant.yaml`, the agent identifier is `my-assistant`. When serving a directory of YAML files, each file becomes a separate agent identified by its filename without the extension.
+- **`:name`** _(optional)_ — The name of a specific sub-agent defined in a multi-agent configuration. If omitted, the request targets the `root` agent. For example, in a config that defines agents named `root`, `coder`, and `reviewer`, use `/api/sessions/:id/agent/my-config/coder` to run the `coder` sub-agent directly.
+
+**Examples:**
+
+```bash
+# Single-agent config: my-assistant.yaml
+# Start: docker agent serve api my-assistant.yaml
+# Run the root agent:
+curl -N -X POST http://localhost:8080/api/sessions/$SID/agent/my-assistant \
+  -H "Content-Type: application/json" \
+  -d '[{"role": "user", "content": "Hello!"}]'
+
+# Multi-agent config: team.yaml (defines agents: root, coder, reviewer)
+# Start: docker agent serve api team.yaml
+# Run the root agent:
+curl -N -X POST http://localhost:8080/api/sessions/$SID/agent/team \
+  -H "Content-Type: application/json" \
+  -d '[{"role": "user", "content": "Review this PR"}]'
+
+# Run a specific sub-agent (reviewer):
+curl -N -X POST http://localhost:8080/api/sessions/$SID/agent/team/reviewer \
+  -H "Content-Type: application/json" \
+  -d '[{"role": "user", "content": "Review this PR"}]'
+```
+
 ### Health
 
 | Method | Path        | Description                               |
@@ -67,10 +94,11 @@ All endpoints are under the `/api` prefix.
 
 ## Streaming Responses
 
-The agent execution endpoints (`POST /api/sessions/:id/agent/:agent`) return **Server-Sent Events (SSE)**. Each event is a JSON object representing a runtime event:
+The agent execution endpoints (`POST /api/sessions/:id/agent/:agent`) return **Server-Sent Events (SSE)**. Each event is a JSON object representing a runtime event (remember that `:agent` is the config filename without the `.yaml` extension):
 
 ```bash
 # Send a message and stream the response
+# (assuming the server was started with: docker agent serve api my-agent.yaml)
 $ curl -N -X POST http://localhost:8080/api/sessions/$SID/agent/my-agent \
   -H "Content-Type: application/json" \
   -d '[{"role": "user", "content": "Hello!"}]'

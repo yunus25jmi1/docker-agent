@@ -124,6 +124,10 @@ func validateConfig(cfg *latest.Config) error {
 		return err
 	}
 
+	if err := resolveRAGDefinitions(cfg); err != nil {
+		return err
+	}
+
 	allNames := map[string]bool{}
 	for _, agent := range cfg.Agents {
 		allNames[agent.Name] = true

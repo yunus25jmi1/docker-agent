@@ -8,6 +8,7 @@ evals
 .vscode
 .idea/
 *.debug
+/lint/lint
 
 # agents
 agent.yaml

@@ -32,6 +32,7 @@ import (
 // Runner runs evaluations against an agent.
 type Runner struct {
 	Config
+
 	agentSource config.Source
 	judge       *Judge
 	runConfig   *config.RuntimeConfig
@@ -625,7 +626,6 @@ func createJudgeModel(ctx context.Context, judgeModel string, runConfig *config.
 	}
 
 	opts := []options.Opt{
-		options.WithThinking(false),
 		options.WithStructuredOutput(judgeResponseSchema),
 	}
 	if runConfig.ModelsGateway != "" {

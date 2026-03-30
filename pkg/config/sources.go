@@ -110,70 +110,82 @@ func (a ociSource) ParentDir() string {
 	return ""
 }
 
-// Read loads an agent configuration from an OCI artifact
+// Read loads an agent configuration from an OCI artifact.
 //
-// The OCI registry remains the source of truth
-// The local content store is used as a cache and fallback only
-// A forced re-pull is triggered exclusively when store corruption is detected
+// The OCI registry remains the source of truth.
+// The local content store is used as a cache and fallback only.
+// A forced re-pull is triggered exclusively when store corruption is detected.
 func (a ociSource) Read(ctx context.Context) ([]byte, error) {
 	store, err := content.NewStore()
 	if err != nil {
 		return nil, fmt.Errorf("failed to create content store: %w", err)
 	}
 
-	tryLoad := func() ([]byte, error) {
-		af, err := store.GetArtifact(a.reference)
-		if err != nil {
-			return nil, err
-		}
-		return []byte(af), nil
+	// Normalize the reference so that equivalent forms (e.g.
+	// "agentcatalog/review-pr" and "index.docker.io/agentcatalog/review-pr:latest")
+	// resolve to the same store key that remote.Pull uses.
+	storeKey, err := remote.NormalizeReference(a.reference)
+	if err != nil {
+		return nil, fmt.Errorf("normalizing OCI reference %s: %w", a.reference, err)
 	}
 
-	// Check if we have any local metadata (same as before)
-	_, metaErr := store.GetArtifactMetadata(a.reference)
-	hasLocal := metaErr == nil
-
-	// Always try normal pull first (preserves pull-interval behavior)
-	if _, pullErr := remote.Pull(ctx, a.reference, false); pullErr != nil {
-		if !hasLocal {
-			return nil, fmt.Errorf("failed to pull OCI image %s: %w", a.reference, pullErr)
-		}
-
-		slog.Debug(
-			"Failed to check for OCI reference updates, using cached version",
-			"ref", a.reference,
-			"error", pullErr,
-		)
-	}
-
-	// Try loading from store
-	data, err := tryLoad()
-	if err == nil {
-		return data, nil
-	}
-
-	// If loading failed due to corruption, force re-pull
-	if errors.Is(err, content.ErrStoreCorrupted) {
-		slog.Warn(
-			"Local OCI store corrupted, forcing re-pull",
-			"ref", a.reference,
-		)
-
-		if _, pullErr := remote.Pull(ctx, a.reference, true); pullErr != nil {
-			return nil, fmt.Errorf("failed to force re-pull OCI image %s: %w", a.reference, pullErr)
-		}
-
-		data, err = tryLoad()
-		if err == nil {
+	// For digest references, the content is immutable. If we already have
+	// the artifact locally, serve it directly without any network call.
+	if remote.IsDigestReference(a.reference) {
+		if data, loadErr := loadArtifact(store, storeKey); loadErr == nil {
+			slog.Debug("Serving digest-pinned OCI artifact from cache", "ref", a.reference)
 			return data, nil
 		}
 	}
 
-	return nil, fmt.Errorf(
-		"failed to load agent from OCI source %s: %w",
-		a.reference,
-		err,
-	)
+	// Check whether we have a local copy to fall back on.
+	hasLocal := hasLocalArtifact(store, storeKey)
+
+	// Pull from registry (checks remote digest, skips download if unchanged).
+	if _, pullErr := remote.Pull(ctx, a.reference, false); pullErr != nil {
+		if !hasLocal {
+			return nil, fmt.Errorf("failed to pull OCI image %s: %w", a.reference, pullErr)
+		}
+		slog.Debug("Failed to check for OCI reference updates, using cached version",
+			"ref", a.reference, "error", pullErr)
+	}
+
+	// Try loading from store.
+	data, err := loadArtifact(store, storeKey)
+	if err == nil {
+		return data, nil
+	}
+
+	// If corrupted, force re-pull and try once more.
+	if !errors.Is(err, content.ErrStoreCorrupted) {
+		return nil, fmt.Errorf("failed to load agent from OCI source %s: %w", a.reference, err)
+	}
+
+	slog.Warn("Local OCI store corrupted, forcing re-pull", "ref", a.reference)
+	if _, pullErr := remote.Pull(ctx, a.reference, true); pullErr != nil {
+		return nil, fmt.Errorf("failed to force re-pull OCI image %s: %w", a.reference, pullErr)
+	}
+
+	data, err = loadArtifact(store, storeKey)
+	if err != nil {
+		return nil, fmt.Errorf("failed to load agent from OCI source %s: %w", a.reference, err)
+	}
+	return data, nil
+}
+
+// loadArtifact reads the agent YAML from the content store.
+func loadArtifact(store *content.Store, storeKey string) ([]byte, error) {
+	af, err := store.GetArtifact(storeKey)
+	if err != nil {
+		return nil, err
+	}
+	return []byte(af), nil
+}
+
+// hasLocalArtifact reports whether the content store has metadata for the given key.
+func hasLocalArtifact(store *content.Store, storeKey string) bool {
+	_, err := store.GetArtifactMetadata(storeKey)
+	return err == nil
 }
 
 // urlSource is used to load an agent configuration from an HTTP/HTTPS URL.
@@ -229,7 +241,7 @@ func (a urlSource) Read(ctx context.Context) ([]byte, error) {
 	// Add GitHub token authorization for GitHub URLs
 	a.addGitHubAuth(ctx, req)
 
-	resp, err := httpclient.NewHTTPClient().Do(req)
+	resp, err := httpclient.NewHTTPClient(ctx).Do(req)
 	if err != nil {
 		// Network error - try to use cached version
 		if cachedData, cacheErr := os.ReadFile(cachePath); cacheErr == nil {

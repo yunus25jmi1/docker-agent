@@ -20,7 +20,7 @@ func newVersionCmd() *cobra.Command {
 }
 
 func runVersionCommand(cmd *cobra.Command, args []string) {
-	telemetry.TrackCommand("version", args)
+	telemetry.TrackCommand(cmd.Context(), "version", args)
 
 	out := cli.NewPrinter(cmd.OutOrStdout())
 

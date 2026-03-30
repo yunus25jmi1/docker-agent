@@ -18,6 +18,7 @@ import (
 // MCPPromptInputDialog implements Dialog for collecting MCP prompt parameters
 type MCPPromptInputDialog struct {
 	BaseDialog
+
 	promptName   string
 	promptInfo   mcptools.PromptInfo
 	inputs       []textinput.Model

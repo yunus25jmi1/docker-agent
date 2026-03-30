@@ -8,7 +8,6 @@ import (
 	"maps"
 	"strings"
 	"sync"
-	"sync/atomic"
 	"time"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
@@ -17,11 +16,10 @@ import (
 	"github.com/docker/docker-agent/pkg/agent"
 	"github.com/docker/docker-agent/pkg/audit"
 	"github.com/docker/docker-agent/pkg/config/latest"
+	"github.com/docker/docker-agent/pkg/chat"
 	"github.com/docker/docker-agent/pkg/config/types"
 	"github.com/docker/docker-agent/pkg/hooks"
 	"github.com/docker/docker-agent/pkg/modelsdev"
-	"github.com/docker/docker-agent/pkg/rag"
-	ragtypes "github.com/docker/docker-agent/pkg/rag/types"
 	"github.com/docker/docker-agent/pkg/session"
 	"github.com/docker/docker-agent/pkg/sessiontitle"
 	"github.com/docker/docker-agent/pkg/team"
@@ -165,12 +163,6 @@ type ModelStore interface {
 	GetDatabase(ctx context.Context) (*modelsdev.Database, error)
 }
 
-// RAGInitializer is implemented by runtimes that support background RAG initialization.
-// Local runtimes use this to start indexing early; remote runtimes typically do not.
-type RAGInitializer interface {
-	StartBackgroundRAGInit(ctx context.Context, sendEvent func(Event))
-}
-
 // ToolsChangeSubscriber is implemented by runtimes that can notify when
 // toolsets report a change in their tool list (e.g. after an MCP
 // ToolListChanged notification). The provided callback is invoked
@@ -194,7 +186,6 @@ type LocalRuntime struct {
 	elicitationRequestCh        chan ElicitationResult // Channel for receiving elicitation responses
 	elicitationEventsChannel    chan Event             // Current events channel for sending elicitation requests
 	elicitationEventsChannelMux sync.RWMutex           // Protects elicitationEventsChannel
-	ragInitialized              atomic.Bool
 	sessionStore                session.Store
 	workingDir                  string   // Working directory for hooks execution
 	env                         []string // Environment variables for hooks execution
@@ -366,107 +357,6 @@ func NewLocalRuntime(agents *team.Team, opts ...Opt) (*LocalRuntime, error) {
 	slog.Debug("Creating new runtime", "agent", r.currentAgent, "available_agents", agents.Size())
 
 	return r, nil
-}
-
-// StartBackgroundRAGInit initializes RAG in background and forwards events
-// Should be called early (e.g., by App) to start indexing before RunStream
-func (r *LocalRuntime) StartBackgroundRAGInit(ctx context.Context, sendEvent func(Event)) {
-	if r.ragInitialized.Swap(true) {
-		return
-	}
-
-	ragManagers := r.team.RAGManagers()
-	if len(ragManagers) == 0 {
-		return
-	}
-
-	slog.Debug("Starting background RAG initialization with event forwarding", "manager_count", len(ragManagers))
-
-	// Set up event forwarding BEFORE starting initialization
-	// This ensures all events are captured
-	r.forwardRAGEvents(ctx, ragManagers, sendEvent)
-
-	// Now start initialization (events will be forwarded)
-	r.team.InitializeRAG(ctx)
-	r.team.StartRAGFileWatchers(ctx)
-}
-
-// forwardRAGEvents forwards RAG manager events to the given callback
-// Consolidates duplicated event forwarding logic
-func (r *LocalRuntime) forwardRAGEvents(ctx context.Context, ragManagers map[string]*rag.Manager, sendEvent func(Event)) {
-	for _, mgr := range ragManagers {
-		go func(mgr *rag.Manager) {
-			ragName := mgr.Name()
-			slog.Debug("Starting RAG event forwarder goroutine", "rag", ragName)
-			for {
-				select {
-				case <-ctx.Done():
-					slog.Debug("RAG event forwarder stopped", "rag", ragName)
-					return
-				case ragEvent, ok := <-mgr.Events():
-					if !ok {
-						slog.Debug("RAG events channel closed", "rag", ragName)
-						return
-					}
-
-					agentName := r.CurrentAgentName()
-					slog.Debug("Forwarding RAG event", "type", ragEvent.Type, "rag", ragName, "agent", agentName)
-
-					switch ragEvent.Type {
-					case ragtypes.EventTypeIndexingStarted:
-						sendEvent(RAGIndexingStarted(ragName, ragEvent.StrategyName, agentName))
-					case ragtypes.EventTypeIndexingProgress:
-						if ragEvent.Progress != nil {
-							sendEvent(RAGIndexingProgress(ragName, ragEvent.StrategyName, ragEvent.Progress.Current, ragEvent.Progress.Total, agentName))
-						}
-					case ragtypes.EventTypeIndexingComplete:
-						sendEvent(RAGIndexingCompleted(ragName, ragEvent.StrategyName, agentName))
-					case ragtypes.EventTypeUsage:
-						// Convert RAG usage to TokenUsageEvent so TUI displays it
-						sendEvent(NewTokenUsageEvent("", agentName, &Usage{
-							InputTokens:   ragEvent.TotalTokens,
-							ContextLength: ragEvent.TotalTokens,
-							Cost:          ragEvent.Cost,
-						}))
-					case ragtypes.EventTypeError:
-						if ragEvent.Error != nil {
-							sendEvent(Error(fmt.Sprintf("RAG %s error: %v", ragName, ragEvent.Error)))
-						}
-					default:
-						// Log unhandled events for debugging
-						slog.Debug("Unhandled RAG event type", "type", ragEvent.Type, "rag", ragName)
-					}
-				}
-			}
-		}(mgr)
-	}
-}
-
-// InitializeRAG is called within RunStream as a fallback when background init wasn't used
-// (e.g., for exec command or API mode where there's no App)
-func (r *LocalRuntime) InitializeRAG(ctx context.Context, events chan Event) {
-	// If already initialized via StartBackgroundRAGInit, skip entirely
-	// Event forwarding was already set up there
-	if r.ragInitialized.Swap(true) {
-		slog.Debug("RAG already initialized, event forwarding already active", "manager_count", len(r.team.RAGManagers()))
-		return
-	}
-
-	ragManagers := r.team.RAGManagers()
-	if len(ragManagers) == 0 {
-		return
-	}
-
-	slog.Debug("Setting up RAG initialization (fallback path for non-TUI)", "manager_count", len(ragManagers))
-
-	// Set up event forwarding BEFORE starting initialization
-	r.forwardRAGEvents(ctx, ragManagers, func(event Event) {
-		events <- event
-	})
-
-	// Start initialization and file watchers
-	r.team.InitializeRAG(ctx)
-	r.team.StartRAGFileWatchers(ctx)
 }
 
 func (r *LocalRuntime) CurrentAgentName() string {
@@ -1005,6 +895,32 @@ func (r *LocalRuntime) EmitStartupInfo(ctx context.Context, sess *session.Sessio
 		}
 		usage := SessionUsage(sess, contextLimit)
 		usage.Cost = sess.TotalCost()
+
+		// Reconstruct LastMessage from the parent session's last assistant
+		// message so that FinishReason (and other per-message fields) are
+		// available on session restore.  We intentionally iterate
+		// sess.Messages (not GetAllMessages) so the result reflects the
+		// parent agent's state: this event carries the parent session_id,
+		// and sub-agents emit their own token_usage events with their own
+		// session_id during live streaming.
+		for i := len(sess.Messages) - 1; i >= 0; i-- {
+			item := &sess.Messages[i]
+			if !item.IsMessage() || item.Message.Message.Role != chat.MessageRoleAssistant {
+				continue
+			}
+			msg := &item.Message.Message
+			lm := &MessageUsage{
+				Model:        msg.Model,
+				Cost:         msg.Cost,
+				FinishReason: msg.FinishReason,
+			}
+			if msg.Usage != nil {
+				lm.Usage = *msg.Usage
+			}
+			usage.LastMessage = lm
+			break
+		}
+
 		send(NewTokenUsageEvent(sess.ID, r.CurrentAgentName(), usage))
 	}
 

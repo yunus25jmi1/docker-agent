@@ -13,6 +13,7 @@ import (
 
 type mockToolSet struct {
 	tools.ToolSet
+
 	toolsFunc func(ctx context.Context) ([]tools.Tool, error)
 }
 
@@ -122,6 +123,7 @@ func TestWithToolsFilter_CaseSensitive(t *testing.T) {
 
 type instructableToolSet struct {
 	mockToolSet
+
 	instructions string
 }
 

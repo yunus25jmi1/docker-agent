@@ -258,16 +258,17 @@ type HTTPClient interface {
 
 // Client provides simplified telemetry functionality for docker agent
 type Client struct {
-	logger     *telemetryLogger
-	userUUID   string
-	enabled    bool
-	debugMode  bool // Print to stdout instead of sending
-	httpClient HTTPClient
-	endpoint   string // Docker events API endpoint
-	apiKey     string // Docker events API key for authentication
-	header     string // Authorization header for remote telemetry
-	version    string // App version for User-Agent and events
-	mu         sync.RWMutex
+	logger      *telemetryLogger
+	userUUID    string
+	desktopUUID string
+	enabled     bool
+	debugMode   bool // Print to stdout instead of sending
+	httpClient  HTTPClient
+	endpoint    string // Docker events API endpoint
+	apiKey      string // Docker events API key for authentication
+	header      string // Authorization header for remote telemetry
+	version     string // App version for User-Agent and events
+	mu          sync.RWMutex
 
 	// Session tracking
 	session SessionState

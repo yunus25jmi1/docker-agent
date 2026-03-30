@@ -14,6 +14,7 @@ import (
 	"github.com/k3a/html2text"
 	"github.com/temoto/robotstxt"
 
+	"github.com/docker/docker-agent/pkg/remote"
 	"github.com/docker/docker-agent/pkg/tools"
 	"github.com/docker/docker-agent/pkg/useragent"
 )
@@ -49,7 +50,8 @@ func (h *fetchHandler) CallTool(ctx context.Context, params FetchToolArgs) (*too
 
 	// Set timeout if specified
 	client := &http.Client{
-		Timeout: h.timeout,
+		Timeout:   h.timeout,
+		Transport: remote.NewTransport(ctx),
 	}
 	if params.Timeout > 0 {
 		client.Timeout = time.Duration(params.Timeout) * time.Second

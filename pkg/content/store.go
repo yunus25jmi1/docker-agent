@@ -267,10 +267,16 @@ func (s *Store) DeleteArtifact(identifier string) error {
 // resolveIdentifier resolves a user-provided identifier (digest or reference)
 // into a concrete content digest stored in the local artifact store.
 func (s *Store) resolveIdentifier(identifier string) (string, error) {
-	// If the identifier is already a digest, we can return it directly.
-	// This bypasses the refs lookup entirely.
+	// If the identifier is already a bare digest, return it directly.
 	if strings.HasPrefix(identifier, "sha256:") {
 		return identifier, nil
+	}
+
+	// If the identifier is a digest reference (e.g. "repo@sha256:abc..."),
+	// extract and return the digest portion directly. Digest references
+	// are content-addressable, so the digest alone identifies the artifact.
+	if i := strings.LastIndex(identifier, "@sha256:"); i >= 0 {
+		return identifier[i+1:], nil
 	}
 
 	// If no tag is provided, default to ":latest".

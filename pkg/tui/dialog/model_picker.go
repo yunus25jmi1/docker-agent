@@ -26,6 +26,7 @@ import (
 // modelPickerDialog is a dialog for selecting a model for the current agent.
 type modelPickerDialog struct {
 	BaseDialog
+
 	textInput  textinput.Model
 	models     []runtime.ModelChoice
 	filtered   []runtime.ModelChoice

@@ -860,3 +860,33 @@ func TestSettings_RestoreTabs(t *testing.T) {
 		})
 	}
 }
+
+func TestConfig_PermissionsRoundTrip(t *testing.T) {
+	t.Parallel()
+
+	tmpDir := t.TempDir()
+	configFile := filepath.Join(tmpDir, "config.yaml")
+
+	original := &Config{
+		Aliases: make(map[string]*Alias),
+		Settings: &Settings{
+			Permissions: &latest.PermissionsConfig{
+				Allow: []string{"read_*", "shell:cmd=git*"},
+				Deny:  []string{"shell:cmd=rm*"},
+				Ask:   []string{"shell:cmd=docker*"},
+			},
+		},
+	}
+
+	err := original.saveTo(configFile)
+	require.NoError(t, err)
+
+	loaded, err := loadFrom(configFile, "")
+	require.NoError(t, err)
+
+	require.NotNil(t, loaded.Settings)
+	require.NotNil(t, loaded.Settings.Permissions)
+	assert.Equal(t, original.Settings.Permissions.Allow, loaded.Settings.Permissions.Allow)
+	assert.Equal(t, original.Settings.Permissions.Deny, loaded.Settings.Permissions.Deny)
+	assert.Equal(t, original.Settings.Permissions.Ask, loaded.Settings.Permissions.Ask)
+}

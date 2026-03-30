@@ -20,6 +20,7 @@ import (
 	"github.com/docker/docker-agent/pkg/environment"
 	"github.com/docker/docker-agent/pkg/model/provider/base"
 	"github.com/docker/docker-agent/pkg/model/provider/options"
+	"github.com/docker/docker-agent/pkg/model/provider/providerutil"
 	"github.com/docker/docker-agent/pkg/modelsdev"
 	"github.com/docker/docker-agent/pkg/tools"
 )
@@ -27,6 +28,7 @@ import (
 // Client represents a Bedrock client wrapper implementing provider.Provider
 type Client struct {
 	base.Config
+
 	bedrockClient    *bedrockruntime.Client
 	cachingSupported bool // Cached at init time for efficiency
 }
@@ -219,7 +221,7 @@ func (c *Client) CreateChatCompletionStream(
 	output, err := c.bedrockClient.ConverseStream(ctx, input)
 	if err != nil {
 		slog.Error("Bedrock ConverseStream failed", "error", err)
-		return nil, fmt.Errorf("bedrock converse stream failed: %w", err)
+		return nil, wrapBedrockError(fmt.Errorf("bedrock converse stream failed: %w", err))
 	}
 
 	trackUsage := c.ModelConfig.TrackUsage == nil || *c.ModelConfig.TrackUsage
@@ -236,23 +238,24 @@ func (c *Client) buildConverseStreamInput(messages []chat.Message, requestTools 
 	// Convert and set messages (excluding system)
 	input.Messages, input.System = convertMessages(messages, enableCaching)
 
-	// Set inference configuration
-	input.InferenceConfig = c.buildInferenceConfig()
+	// Compute thinking fields first — its presence drives the inference config.
+	additionalFields := c.buildAdditionalModelRequestFields()
+	if additionalFields != nil {
+		input.AdditionalModelRequestFields = additionalFields
+	}
+
+	// Set inference configuration (temp/topP are suppressed when thinking is on).
+	input.InferenceConfig = c.buildInferenceConfig(c.isThinkingEnabled())
 
 	// Convert and set tools
 	if len(requestTools) > 0 {
 		input.ToolConfig = convertToolConfig(requestTools, enableCaching)
 	}
 
-	// Set extended thinking configuration for Claude models
-	if additionalFields := c.buildAdditionalModelRequestFields(); additionalFields != nil {
-		input.AdditionalModelRequestFields = additionalFields
-	}
-
 	return input
 }
 
-func (c *Client) buildInferenceConfig() *types.InferenceConfiguration {
+func (c *Client) buildInferenceConfig(thinkingEnabled bool) *types.InferenceConfiguration {
 	cfg := &types.InferenceConfiguration{}
 
 	if c.ModelConfig.MaxTokens != nil && *c.ModelConfig.MaxTokens > 0 {
@@ -261,7 +264,7 @@ func (c *Client) buildInferenceConfig() *types.InferenceConfiguration {
 
 	// Temperature and TopP cannot be set when extended thinking is enabled
 	// (Claude requires temperature=1.0 which is the default when thinking is on)
-	if !c.isThinkingEnabled() {
+	if !thinkingEnabled {
 		if c.ModelConfig.Temperature != nil {
 			cfg.Temperature = aws.Float32(float32(*c.ModelConfig.Temperature))
 		}
@@ -275,37 +278,42 @@ func (c *Client) buildInferenceConfig() *types.InferenceConfiguration {
 	return cfg
 }
 
-// resolveThinkingTokens returns the effective token budget for thinking.
-// It handles both explicit token counts and effort-level strings.
-// Returns 0 if no valid thinking budget is configured.
-func (c *Client) resolveThinkingTokens() int {
-	if c.ModelConfig.ThinkingBudget == nil {
-		return 0
+func (c *Client) interleavedThinkingEnabled() bool {
+	// Default to true, matching the documented schema behavior.
+	v, ok := c.ModelConfig.ProviderOpts["interleaved_thinking"]
+	if !ok {
+		return true
 	}
-	if tokens, ok := c.ModelConfig.ThinkingBudget.EffortTokens(); ok {
-		return tokens
+	b, ok := v.(bool)
+	if !ok {
+		slog.Warn("Bedrock provider_opts type mismatch",
+			"key", "interleaved_thinking",
+			"expected_type", "bool",
+			"actual_type", fmt.Sprintf("%T", v),
+			"value", v)
+		return true
 	}
-	return c.ModelConfig.ThinkingBudget.Tokens
+	return b
 }
 
-// isThinkingEnabled mirrors the validation in buildAdditionalModelRequestFields
-// to determine if thinking params will affect inference config (temp/topP constraints).
+// isThinkingEnabled returns true if a valid thinking budget is configured.
+// It mirrors the validation in buildAdditionalModelRequestFields but without
+// side effects (no logging), so it can safely be used to gate inference config.
 func (c *Client) isThinkingEnabled() bool {
-	tokens := c.resolveThinkingTokens()
+	if c.ModelConfig.ThinkingBudget == nil {
+		return false
+	}
+	tokens := c.ModelConfig.ThinkingBudget.Tokens
+	if t, ok := c.ModelConfig.ThinkingBudget.EffortTokens(); ok {
+		tokens = t
+	}
 	if tokens < 1024 {
 		return false
 	}
-
-	// Check against max_tokens
 	if c.ModelConfig.MaxTokens != nil && tokens >= int(*c.ModelConfig.MaxTokens) {
 		return false
 	}
-
 	return true
-}
-
-func (c *Client) interleavedThinkingEnabled() bool {
-	return getProviderOpt[bool](c.ModelConfig.ProviderOpts, "interleaved_thinking")
 }
 
 func (c *Client) promptCachingEnabled() bool {
@@ -315,43 +323,56 @@ func (c *Client) promptCachingEnabled() bool {
 	return c.cachingSupported
 }
 
-// buildAdditionalModelRequestFields configures Claude's extended thinking (reasoning) mode.
+// buildAdditionalModelRequestFields configures Claude's extended thinking (reasoning) mode
+// and forwards supported sampling parameters from provider_opts (e.g. top_k).
 func (c *Client) buildAdditionalModelRequestFields() document.Interface {
-	tokens := c.resolveThinkingTokens()
-	if tokens <= 0 {
+	fields := map[string]any{}
+
+	// Forward top_k from provider_opts (Anthropic on Bedrock supports it)
+	if topK, ok := providerutil.GetProviderOptInt64(c.ModelConfig.ProviderOpts, "top_k"); ok {
+		fields["top_k"] = topK
+		slog.Debug("Bedrock provider_opts: set top_k", "value", topK)
+	}
+
+	// Configure thinking budget if present and valid
+	if budget := c.ModelConfig.ThinkingBudget; budget != nil {
+		tokens := budget.Tokens
+		if t, ok := budget.EffortTokens(); ok {
+			tokens = t
+		}
+
+		valid := tokens > 0
+		if valid && tokens < 1024 {
+			slog.Warn("Bedrock thinking_budget below minimum (1024), ignoring", "tokens", tokens)
+			valid = false
+		}
+		if valid && c.ModelConfig.MaxTokens != nil && tokens >= int(*c.ModelConfig.MaxTokens) {
+			slog.Warn("Bedrock thinking_budget must be less than max_tokens, ignoring",
+				"thinking_budget", tokens,
+				"max_tokens", *c.ModelConfig.MaxTokens)
+			valid = false
+		}
+
+		if valid {
+			slog.Debug("Bedrock request using thinking_budget", "budget_tokens", tokens)
+			fields["thinking"] = map[string]any{
+				"type":          "enabled",
+				"budget_tokens": tokens,
+			}
+
+			if c.interleavedThinkingEnabled() {
+				fields["anthropic_beta"] = []string{"interleaved-thinking-2025-05-14"}
+				slog.Debug("Bedrock request using interleaved thinking beta")
+			} else {
+				slog.Warn("Bedrock thinking_budget is set but interleaved_thinking is explicitly disabled; " +
+					"the anthropic_beta header will not be sent, which may cause the thinking budget to be ignored")
+			}
+		}
+	}
+
+	if len(fields) == 0 {
 		return nil
 	}
-
-	// Validate minimum (Claude requires at least 1024 tokens for thinking)
-	if tokens < 1024 {
-		slog.Warn("Bedrock thinking_budget below minimum (1024), ignoring",
-			"tokens", tokens)
-		return nil
-	}
-
-	// Validate against max_tokens
-	if c.ModelConfig.MaxTokens != nil && tokens >= int(*c.ModelConfig.MaxTokens) {
-		slog.Warn("Bedrock thinking_budget must be less than max_tokens, ignoring",
-			"thinking_budget", tokens,
-			"max_tokens", *c.ModelConfig.MaxTokens)
-		return nil
-	}
-
-	slog.Debug("Bedrock request using thinking_budget", "budget_tokens", tokens)
-
-	fields := map[string]any{
-		"thinking": map[string]any{
-			"type":          "enabled",
-			"budget_tokens": tokens,
-		},
-	}
-
-	// Add anthropic_beta field for interleaved thinking
-	if c.interleavedThinkingEnabled() {
-		fields["anthropic_beta"] = []string{"interleaved-thinking-2025-05-14"}
-		slog.Debug("Bedrock request using interleaved thinking beta")
-	}
-
 	return document.NewLazyDocument(fields)
 }
 

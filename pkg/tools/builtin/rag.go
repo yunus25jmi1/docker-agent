@@ -10,23 +10,28 @@ import (
 	"slices"
 
 	"github.com/docker/docker-agent/pkg/rag"
+	ragtypes "github.com/docker/docker-agent/pkg/rag/types"
 	"github.com/docker/docker-agent/pkg/tools"
 )
 
-// RAGTool provides document querying capabilities for a single RAG source
+// RAGEventCallback is called to forward RAG manager events during initialization.
+type RAGEventCallback func(event ragtypes.Event)
+
+// RAGTool provides document querying capabilities for a single RAG source.
 type RAGTool struct {
-	manager  *rag.Manager
-	toolName string
+	manager       *rag.Manager
+	toolName      string
+	eventCallback RAGEventCallback
 }
 
-// Verify interface compliance
+// Verify interface compliance.
 var (
 	_ tools.ToolSet      = (*RAGTool)(nil)
 	_ tools.Instructable = (*RAGTool)(nil)
+	_ tools.Startable    = (*RAGTool)(nil)
 )
 
-// NewRAGTool creates a new RAG tool for a single RAG manager
-// toolName is the name to use for the tool (typically from config or manager name)
+// NewRAGTool creates a new RAG tool for a single RAG manager.
 func NewRAGTool(manager *rag.Manager, toolName string) *RAGTool {
 	return &RAGTool{
 		manager:  manager,
@@ -34,28 +39,83 @@ func NewRAGTool(manager *rag.Manager, toolName string) *RAGTool {
 	}
 }
 
-type QueryRAGArgs struct {
-	Query string `json:"query" jsonschema:"Search query"`
+// Name returns the tool name for this RAG source.
+func (t *RAGTool) Name() string {
+	return t.toolName
 }
 
-type QueryResult struct {
-	SourcePath string  `json:"source_path" jsonschema:"Path to the source document"`
-	Content    string  `json:"content" jsonschema:"Relevant document chunk content"`
-	Similarity float64 `json:"similarity" jsonschema:"Similarity score (0-1)"`
-	ChunkIndex int     `json:"chunk_index" jsonschema:"Index of the chunk within the source document"`
+// SetEventCallback sets a callback to receive RAG manager events during
+// initialization. Must be called before Start().
+func (t *RAGTool) SetEventCallback(cb RAGEventCallback) {
+	t.eventCallback = cb
+}
+
+// Start initializes the RAG manager (indexes documents) and starts a
+// file watcher for incremental updates.
+func (t *RAGTool) Start(ctx context.Context) error {
+	if t.manager == nil {
+		return nil
+	}
+
+	// Forward RAG manager events if a callback is set.
+	if t.eventCallback != nil {
+		go t.forwardEvents(ctx)
+	}
+
+	if err := t.manager.Initialize(ctx); err != nil {
+		return fmt.Errorf("failed to initialize RAG manager %q: %w", t.toolName, err)
+	}
+
+	go func() {
+		if err := t.manager.StartFileWatcher(ctx); err != nil {
+			slog.Error("Failed to start RAG file watcher", "tool", t.toolName, "error", err)
+		}
+	}()
+	return nil
+}
+
+// Stop closes the RAG manager and releases resources.
+func (t *RAGTool) Stop(_ context.Context) error {
+	if t.manager == nil {
+		return nil
+	}
+	return t.manager.Close()
+}
+
+// forwardEvents reads events from the RAG manager and forwards them via the callback.
+func (t *RAGTool) forwardEvents(ctx context.Context) {
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case event, ok := <-t.manager.Events():
+			if !ok {
+				return
+			}
+			t.eventCallback(event)
+		}
+	}
 }
 
 func (t *RAGTool) Instructions() string {
 	if t.manager != nil {
-		instruction := t.manager.ToolInstruction()
-		if instruction != "" {
+		if instruction := t.manager.ToolInstruction(); instruction != "" {
 			return instruction
 		}
 	}
-
-	// Default instruction if none provided
 	return fmt.Sprintf("Search documents in %s to find relevant code or documentation. "+
 		"Provide a clear search query describing what you need.", t.toolName)
+}
+
+type queryRAGArgs struct {
+	Query string `json:"query" jsonschema:"Search query"`
+}
+
+type queryResult struct {
+	SourcePath string  `json:"source_path" jsonschema:"Path to the source document"`
+	Content    string  `json:"content" jsonschema:"Relevant document chunk content"`
+	Similarity float64 `json:"similarity" jsonschema:"Similarity score (0-1)"`
+	ChunkIndex int     `json:"chunk_index" jsonschema:"Index of the chunk within the source document"`
 }
 
 func (t *RAGTool) Tools(context.Context) ([]tools.Tool, error) {
@@ -67,83 +127,53 @@ func (t *RAGTool) Tools(context.Context) ([]tools.Tool, error) {
 		"Provide a natural language query describing what you need. "+
 		"Returns the most relevant document chunks with file paths.", t.toolName))
 
-	paramsSchema := tools.MustSchemaFor[QueryRAGArgs]()
-	outputSchema := tools.MustSchemaFor[[]QueryResult]()
-
-	// Log schemas for debugging
-	if paramsJSON, err := json.Marshal(paramsSchema); err == nil {
-		slog.Debug("RAG tool parameters schema",
-			"tool_name", t.toolName,
-			"schema", string(paramsJSON))
-	}
-	if outputJSON, err := json.Marshal(outputSchema); err == nil {
-		slog.Debug("RAG tool output schema",
-			"tool_name", t.toolName,
-			"schema", string(outputJSON))
-	}
-
-	tool := tools.Tool{
+	return []tools.Tool{{
 		Name:         t.toolName,
 		Category:     "knowledge",
 		Description:  description,
-		Parameters:   paramsSchema,
-		OutputSchema: outputSchema,
+		Parameters:   tools.MustSchemaFor[queryRAGArgs](),
+		OutputSchema: tools.MustSchemaFor[[]queryResult](),
 		Handler:      tools.NewHandler(t.handleQueryRAG),
 		Annotations: tools.ToolAnnotations{
 			ReadOnlyHint: true,
 			Title:        "Query " + t.toolName,
 		},
-	}
-
-	slog.Debug("RAG tool registered",
-		"tool_name", tool.Name,
-		"category", tool.Category,
-		"description", description,
-		"title", tool.Annotations.Title,
-		"read_only", tool.Annotations.ReadOnlyHint)
-
-	return []tools.Tool{tool}, nil
+	}}, nil
 }
 
-func (t *RAGTool) handleQueryRAG(ctx context.Context, args QueryRAGArgs) (*tools.ToolCallResult, error) {
+func (t *RAGTool) handleQueryRAG(ctx context.Context, args queryRAGArgs) (*tools.ToolCallResult, error) {
 	if args.Query == "" {
 		return nil, errors.New("query cannot be empty")
 	}
 
 	results, err := t.manager.Query(ctx, args.Query)
 	if err != nil {
-		slog.Error("RAG query failed", "rag", t.manager.Name(), "error", err)
 		return nil, fmt.Errorf("RAG query failed: %w", err)
 	}
 
-	allResults := make([]QueryResult, 0, len(results))
-	for _, result := range results {
-		allResults = append(allResults, QueryResult{
-			SourcePath: result.Document.SourcePath,
-			Content:    result.Document.Content,
-			Similarity: result.Similarity,
-			ChunkIndex: result.Document.ChunkIndex,
+	out := make([]queryResult, 0, len(results))
+	for _, r := range results {
+		out = append(out, queryResult{
+			SourcePath: r.Document.SourcePath,
+			Content:    r.Document.Content,
+			Similarity: r.Similarity,
+			ChunkIndex: r.Document.ChunkIndex,
 		})
 	}
 
-	sortResults(allResults)
+	slices.SortFunc(out, func(a, b queryResult) int {
+		return cmp.Compare(b.Similarity, a.Similarity)
+	})
 
-	maxResults := 10
-	if len(allResults) > maxResults {
-		allResults = allResults[:maxResults]
+	const maxResults = 10
+	if len(out) > maxResults {
+		out = out[:maxResults]
 	}
 
-	resultJSON, err := json.Marshal(allResults)
+	resultJSON, err := json.Marshal(out)
 	if err != nil {
 		return nil, fmt.Errorf("failed to marshal results: %w", err)
 	}
 
 	return tools.ResultSuccess(string(resultJSON)), nil
-}
-
-// sortResults sorts query results by similarity in descending order
-func sortResults(results []QueryResult) {
-	slices.SortFunc(results, func(a, b QueryResult) int {
-		return cmp.Compare(b.Similarity, a.Similarity) // Descending order
-	})
 }

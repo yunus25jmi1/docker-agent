@@ -124,6 +124,11 @@ var Aliases = map[string]Alias{
 		BaseURL:     "https://api.minimax.io/v1",
 		TokenEnvVar: "MINIMAX_API_KEY",
 	},
+	"github-copilot": {
+		APIType:     "openai",
+		BaseURL:     "https://api.githubcopilot.com",
+		TokenEnvVar: "GITHUB_TOKEN",
+	},
 }
 
 // Provider defines the interface for model providers
@@ -228,9 +233,6 @@ func createDirectProvider(ctx context.Context, cfg *latest.ModelConfig, env envi
 
 	// Apply defaults from custom providers (from config) or built-in aliases
 	enhancedCfg := applyProviderDefaults(cfg, globalOptions.Providers())
-
-	// Apply overrides (e.g., disable/enable thinking via /think command)
-	enhancedCfg = applyOverrides(enhancedCfg, &globalOptions)
 
 	providerType := resolveProviderType(enhancedCfg)
 
@@ -373,81 +375,6 @@ func applyModelDefaults(cfg *latest.ModelConfig) {
 			slog.Debug("Applied default thinking for thinking-only OpenAI model",
 				"provider", cfg.Provider, "model", cfg.Model)
 		}
-	}
-}
-
-// applyOverrides applies session-level overrides to the configuration (e.g. /think toggle).
-// The returned config never shares mutable state with the input.
-func applyOverrides(cfg *latest.ModelConfig, opts *options.ModelOptions) *latest.ModelConfig {
-	if opts == nil {
-		return cfg
-	}
-
-	t := opts.Thinking()
-	if t == nil {
-		return cfg
-	}
-
-	enhancedCfg := cloneModelConfig(cfg)
-
-	// /think OFF — clear everything.
-	if !*t {
-		enhancedCfg.ThinkingBudget = nil
-		delete(enhancedCfg.ProviderOpts, "interleaved_thinking")
-		slog.Debug("Override: thinking disabled",
-			"provider", cfg.Provider, "model", cfg.Model)
-		return enhancedCfg
-	}
-
-	// /think ON — make sure there is a sensible budget.
-	if enhancedCfg.ThinkingBudget == nil || enhancedCfg.ThinkingBudget.IsDisabled() {
-		enhancedCfg.ThinkingBudget = nil
-		setThinkingDefaults(enhancedCfg)
-		slog.Debug("Override: thinking enabled with defaults",
-			"provider", cfg.Provider, "model", cfg.Model,
-			"thinking_budget", enhancedCfg.ThinkingBudget)
-	}
-
-	return enhancedCfg
-}
-
-// setThinkingDefaults assigns a sensible default thinking budget for /think ON.
-// Unlike applyModelDefaults this applies to every provider (not just thinking-only models)
-// because the user explicitly asked for thinking.
-func setThinkingDefaults(cfg *latest.ModelConfig) {
-	providerType := resolveProviderType(cfg)
-
-	switch providerType {
-	case "openai", "openai_chatcompletions", "openai_responses":
-		cfg.ThinkingBudget = &latest.ThinkingBudget{Effort: "medium"}
-	case "anthropic":
-		cfg.ThinkingBudget = &latest.ThinkingBudget{Tokens: 8192}
-		ensureInterleavedThinking(cfg, providerType)
-	case "google":
-		cfg.ThinkingBudget = defaultGoogleThinkingBudget(cfg.Model)
-	case "amazon-bedrock":
-		if isBedrockClaudeModel(cfg.Model) {
-			cfg.ThinkingBudget = &latest.ThinkingBudget{Tokens: 8192}
-			ensureInterleavedThinking(cfg, providerType)
-		}
-	}
-}
-
-// defaultGoogleThinkingBudget returns a sensible thinking budget for a Google model.
-// Returns nil for models that don't have a known thinking capability.
-func defaultGoogleThinkingBudget(model string) *latest.ThinkingBudget {
-	m := strings.ToLower(model)
-	switch {
-	case strings.HasPrefix(m, "gemini-2.5-"):
-		return &latest.ThinkingBudget{Tokens: -1}
-	case isGeminiProModel(m):
-		return &latest.ThinkingBudget{Effort: "high"}
-	case isGeminiFlashModel(m):
-		return &latest.ThinkingBudget{Effort: "medium"}
-	default:
-		// Unknown or older Gemini models (e.g. gemini-2.0-*): don't enable
-		// thinking since the API may reject it.
-		return nil
 	}
 }
 

@@ -80,7 +80,6 @@ func TestNewSubSession(t *testing.T) {
 		assert.Equal(t, parent.ID, s.ParentID)
 		assert.Equal(t, "Test task", s.Title)
 		assert.True(t, s.ToolsApproved)
-		assert.False(t, s.Thinking) // childAgent has no ThinkingConfigured
 		assert.False(t, s.SendUserMessage)
 		assert.Equal(t, 10, s.MaxIterations)
 		// AgentName should NOT be set when PinAgent is false
@@ -156,43 +155,8 @@ func TestSubSessionConfig_DefaultValues(t *testing.T) {
 	s := newSubSession(parent, cfg, childAgent)
 
 	assert.False(t, s.ToolsApproved)
-	assert.False(t, s.Thinking)
 	assert.False(t, s.SendUserMessage)
 	assert.Empty(t, s.AgentName)
-}
-
-func TestSubSessionConfig_ThinkingFromChildAgent(t *testing.T) {
-	parent := session.New(session.WithUserMessage("hello"))
-
-	t.Run("child agent without thinking configured gets thinking=false even if parent has thinking=true", func(t *testing.T) {
-		parent.Thinking = true
-
-		childAgent := agent.New("haiku-worker", "")
-
-		cfg := SubSessionConfig{
-			Task:      "simple task",
-			AgentName: "haiku-worker",
-			Title:     "Transferred task",
-		}
-
-		s := newSubSession(parent, cfg, childAgent)
-		assert.False(t, s.Thinking, "sub-session should NOT inherit parent's thinking when child agent has no thinking_budget")
-	})
-
-	t.Run("child agent with thinking configured gets thinking=true", func(t *testing.T) {
-		parent.Thinking = false
-
-		childAgent := agent.New("opus-worker", "", agent.WithThinkingConfigured(true))
-
-		cfg := SubSessionConfig{
-			Task:      "complex task",
-			AgentName: "opus-worker",
-			Title:     "Transferred task",
-		}
-
-		s := newSubSession(parent, cfg, childAgent)
-		assert.True(t, s.Thinking, "sub-session should have thinking enabled when child agent has thinking_budget")
-	})
 }
 
 func TestSubSessionConfig_InheritsAgentLimits(t *testing.T) {

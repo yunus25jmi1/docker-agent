@@ -1,7 +1,6 @@
 package agent
 
 import (
-	"bytes"
 	"context"
 	"errors"
 	"log/slog"
@@ -11,6 +10,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/docker/docker-agent/pkg/chat"
+	"github.com/docker/docker-agent/pkg/concurrent"
 	"github.com/docker/docker-agent/pkg/model/provider/base"
 	"github.com/docker/docker-agent/pkg/tools"
 )
@@ -144,7 +144,7 @@ func TestModelOverride(t *testing.T) {
 func TestModel_LogsSelection(t *testing.T) {
 	t.Parallel()
 
-	var buf bytes.Buffer
+	var buf concurrent.Buffer
 	handler := slog.NewTextHandler(&buf, &slog.HandlerOptions{Level: slog.LevelInfo})
 	prev := slog.Default()
 	slog.SetDefault(slog.New(handler))

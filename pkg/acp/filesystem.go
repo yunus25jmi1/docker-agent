@@ -32,6 +32,7 @@ func getSessionID(ctx context.Context) (string, bool) {
 // and edit_file to use the ACP connection for file operations
 type FilesystemToolset struct {
 	*builtin.FilesystemTool
+
 	agent      *Agent
 	workingDir string
 }

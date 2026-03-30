@@ -19,6 +19,7 @@ import (
 // streamAdapter adapts the Anthropic stream to our interface
 type streamAdapter struct {
 	retryableStream[anthropic.MessageStreamEventUnion]
+
 	trackUsage         bool
 	toolCall           bool
 	toolID             string
@@ -78,7 +79,7 @@ func (a *streamAdapter) Recv() (chat.MessageStreamResponse, error) {
 	response := chat.MessageStreamResponse{
 		ID:     event.Message.ID,
 		Object: "chat.completion.chunk",
-		Model:  string(event.Message.Model),
+		Model:  event.Message.Model,
 		Choices: []chat.MessageStreamChoice{
 			{
 				Index: 0,

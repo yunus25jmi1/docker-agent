@@ -36,7 +36,9 @@ agents:
     model: openai/gpt-4o
     instruction: |
       You have access to a knowledge base. Use it to answer questions.
-    rag: [my_docs]
+    toolsets:
+      - type: rag
+        ref: my_docs
 ```
 
 ## Retrieval Strategies

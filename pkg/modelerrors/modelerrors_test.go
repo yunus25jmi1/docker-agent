@@ -66,69 +66,9 @@ func TestIsRetryableModelError(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
-			assert.Equal(t, tt.expected, IsRetryableModelError(tt.err), "IsRetryableModelError(%v)", tt.err)
+			assert.Equal(t, tt.expected, isRetryableModelError(tt.err), "isRetryableModelError(%v)", tt.err)
 		})
 	}
-}
-
-func TestCalculateBackoff(t *testing.T) {
-	t.Parallel()
-
-	tests := []struct {
-		attempt     int
-		minExpected time.Duration
-		maxExpected time.Duration
-	}{
-		{attempt: 0, minExpected: 180 * time.Millisecond, maxExpected: 220 * time.Millisecond},
-		{attempt: 1, minExpected: 360 * time.Millisecond, maxExpected: 440 * time.Millisecond},
-		{attempt: 2, minExpected: 720 * time.Millisecond, maxExpected: 880 * time.Millisecond},
-		{attempt: 3, minExpected: 1440 * time.Millisecond, maxExpected: 1760 * time.Millisecond},
-		{attempt: 10, minExpected: 1800 * time.Millisecond, maxExpected: 2200 * time.Millisecond}, // capped at 2s
-	}
-
-	for _, tt := range tests {
-		t.Run(fmt.Sprintf("attempt_%d", tt.attempt), func(t *testing.T) {
-			t.Parallel()
-			backoff := CalculateBackoff(tt.attempt)
-			assert.GreaterOrEqual(t, backoff, tt.minExpected, "backoff should be at least %v", tt.minExpected)
-			assert.LessOrEqual(t, backoff, tt.maxExpected, "backoff should be at most %v", tt.maxExpected)
-		})
-	}
-
-	t.Run("negative attempt treated as 0", func(t *testing.T) {
-		t.Parallel()
-		backoff := CalculateBackoff(-1)
-		assert.GreaterOrEqual(t, backoff, 180*time.Millisecond)
-		assert.LessOrEqual(t, backoff, 220*time.Millisecond)
-	})
-}
-
-func TestSleepWithContext(t *testing.T) {
-	t.Parallel()
-
-	t.Run("completes normally", func(t *testing.T) {
-		t.Parallel()
-		ctx := t.Context()
-		start := time.Now()
-		completed := SleepWithContext(ctx, 10*time.Millisecond)
-		elapsed := time.Since(start)
-
-		assert.True(t, completed, "should complete normally")
-		assert.GreaterOrEqual(t, elapsed, 10*time.Millisecond)
-	})
-
-	t.Run("interrupted by context", func(t *testing.T) {
-		t.Parallel()
-		ctx, cancel := context.WithCancel(t.Context())
-		time.AfterFunc(10*time.Millisecond, cancel)
-
-		start := time.Now()
-		completed := SleepWithContext(ctx, 1*time.Second)
-		elapsed := time.Since(start)
-
-		assert.False(t, completed, "should be interrupted")
-		assert.Less(t, elapsed, 100*time.Millisecond, "should return quickly after cancel")
-	})
 }
 
 func TestExtractHTTPStatusCode(t *testing.T) {
@@ -145,12 +85,16 @@ func TestExtractHTTPStatusCode(t *testing.T) {
 		{name: "502 in message", err: errors.New("502 bad gateway"), expected: 502},
 		{name: "401 in message", err: errors.New("401 unauthorized"), expected: 401},
 		{name: "no status code", err: errors.New("connection refused"), expected: 0},
+		// StatusError structural path
+		{name: "StatusError 429", err: &StatusError{StatusCode: 429, Err: errors.New("rate limited")}, expected: 429},
+		{name: "StatusError 500", err: &StatusError{StatusCode: 500, Err: errors.New("server error")}, expected: 500},
+		{name: "wrapped StatusError", err: fmt.Errorf("outer: %w", &StatusError{StatusCode: 503, Err: errors.New("unavailable")}), expected: 503},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
-			assert.Equal(t, tt.expected, ExtractHTTPStatusCode(tt.err), "ExtractHTTPStatusCode(%v)", tt.err)
+			assert.Equal(t, tt.expected, extractHTTPStatusCode(tt.err), "extractHTTPStatusCode(%v)", tt.err)
 		})
 	}
 }
@@ -174,7 +118,7 @@ func TestIsRetryableStatusCode(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(fmt.Sprintf("status_%d", tt.statusCode), func(t *testing.T) {
 			t.Parallel()
-			assert.Equal(t, tt.expected, IsRetryableStatusCode(tt.statusCode), "IsRetryableStatusCode(%d)", tt.statusCode)
+			assert.Equal(t, tt.expected, isRetryableStatusCode(tt.statusCode), "isRetryableStatusCode(%d)", tt.statusCode)
 		})
 	}
 }
@@ -219,20 +163,28 @@ func TestContextOverflowError(t *testing.T) {
 	t.Run("wraps underlying error", func(t *testing.T) {
 		t.Parallel()
 		underlying := errors.New("prompt is too long: 226360 tokens > 200000 maximum")
-		ctxErr := &ContextOverflowError{Underlying: underlying}
+		ctxErr := NewContextOverflowError(underlying)
 
 		assert.Contains(t, ctxErr.Error(), "context window overflow")
 		assert.Contains(t, ctxErr.Error(), "prompt is too long")
 		assert.ErrorIs(t, ctxErr, underlying)
 	})
 
-	t.Run("errors.As works", func(t *testing.T) {
+	t.Run("nil underlying returns fallback message", func(t *testing.T) {
+		t.Parallel()
+		ctxErr := NewContextOverflowError(nil)
+		assert.Equal(t, "context window overflow", ctxErr.Error())
+		assert.NoError(t, ctxErr.Unwrap())
+	})
+
+	t.Run("errors.As works through wrapping", func(t *testing.T) {
 		t.Parallel()
 		underlying := errors.New("test error")
-		wrapped := fmt.Errorf("all models failed: %w", &ContextOverflowError{Underlying: underlying})
+		wrapped := fmt.Errorf("all models failed: %w", NewContextOverflowError(underlying))
 
 		var ctxErr *ContextOverflowError
-		assert.ErrorAs(t, wrapped, &ctxErr)
+		require.ErrorAs(t, wrapped, &ctxErr)
+		assert.Equal(t, underlying, ctxErr.Underlying)
 	})
 }
 
@@ -252,7 +204,7 @@ func TestIsRetryableModelError_ContextOverflow(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
-			assert.False(t, IsRetryableModelError(tt.err), "context overflow errors should not be retryable: %v", tt.err)
+			assert.False(t, isRetryableModelError(tt.err), "context overflow errors should not be retryable: %v", tt.err)
 		})
 	}
 }
@@ -267,11 +219,19 @@ func TestFormatError(t *testing.T) {
 
 	t.Run("context overflow shows user-friendly message", func(t *testing.T) {
 		t.Parallel()
-		err := &ContextOverflowError{Underlying: errors.New("prompt is too long")}
+		err := NewContextOverflowError(errors.New("prompt is too long"))
 		msg := FormatError(err)
 		assert.Contains(t, msg, "context window")
 		assert.Contains(t, msg, "/compact")
 		assert.NotContains(t, msg, "prompt is too long")
+	})
+
+	t.Run("wrapped context overflow shows user-friendly message", func(t *testing.T) {
+		t.Parallel()
+		err := fmt.Errorf("outer: %w", NewContextOverflowError(errors.New("prompt is too long")))
+		msg := FormatError(err)
+		assert.Contains(t, msg, "context window")
+		assert.Contains(t, msg, "/compact")
 	})
 
 	t.Run("generic error preserves message", func(t *testing.T) {
@@ -301,15 +261,15 @@ func TestParseRetryAfterHeader(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
-			got := ParseRetryAfterHeader(tt.value)
-			assert.Equal(t, tt.expected, got, "ParseRetryAfterHeader(%q)", tt.value)
+			got := parseRetryAfterHeader(tt.value)
+			assert.Equal(t, tt.expected, got, "parseRetryAfterHeader(%q)", tt.value)
 		})
 	}
 
 	t.Run("HTTP-date in the future", func(t *testing.T) {
 		t.Parallel()
 		future := time.Now().Add(10 * time.Second).UTC().Format(http.TimeFormat)
-		got := ParseRetryAfterHeader(future)
+		got := parseRetryAfterHeader(future)
 		assert.Greater(t, got, 0*time.Second, "should return positive duration for future HTTP-date")
 		assert.LessOrEqual(t, got, 11*time.Second, "should not exceed ~10s for near-future date")
 	})
@@ -317,7 +277,7 @@ func TestParseRetryAfterHeader(t *testing.T) {
 	t.Run("HTTP-date in the past", func(t *testing.T) {
 		t.Parallel()
 		past := time.Now().Add(-10 * time.Second).UTC().Format(http.TimeFormat)
-		got := ParseRetryAfterHeader(past)
+		got := parseRetryAfterHeader(past)
 		assert.Equal(t, 0*time.Second, got, "should return 0 for past HTTP-date")
 	})
 }
@@ -325,11 +285,11 @@ func TestParseRetryAfterHeader(t *testing.T) {
 func TestStatusError(t *testing.T) {
 	t.Parallel()
 
-	t.Run("Error() delegates to wrapped error", func(t *testing.T) {
+	t.Run("Error() includes status code and wrapped message", func(t *testing.T) {
 		t.Parallel()
 		underlying := errors.New("rate limit exceeded")
 		se := &StatusError{StatusCode: 429, Err: underlying}
-		assert.Equal(t, underlying.Error(), se.Error())
+		assert.Equal(t, "HTTP 429: rate limit exceeded", se.Error())
 	})
 
 	t.Run("Unwrap() allows errors.Is traversal", func(t *testing.T) {
@@ -375,7 +335,7 @@ func TestWrapHTTPError(t *testing.T) {
 		require.ErrorAs(t, result, &se)
 		assert.Equal(t, 429, se.StatusCode)
 		assert.Equal(t, time.Duration(0), se.RetryAfter)
-		assert.Equal(t, origErr.Error(), se.Error())
+		assert.Equal(t, "HTTP 429: rate limited", se.Error())
 	})
 
 	t.Run("429 with Retry-After header sets RetryAfter", func(t *testing.T) {
@@ -463,5 +423,16 @@ func TestClassifyModelError(t *testing.T) {
 		assert.False(t, retryable)
 		assert.True(t, rateLimited)
 		assert.Equal(t, 15*time.Second, retryAfterOut)
+	})
+
+	t.Run("ContextOverflowError wrapping a StatusError is not retryable", func(t *testing.T) {
+		t.Parallel()
+		// A 400 StatusError whose message also triggers context overflow detection
+		statusErr := &StatusError{StatusCode: 400, Err: errors.New("prompt is too long")}
+		ctxErr := NewContextOverflowError(statusErr)
+		retryable, rateLimited, retryAfter := ClassifyModelError(ctxErr)
+		assert.False(t, retryable, "context overflow should never be retryable")
+		assert.False(t, rateLimited)
+		assert.Equal(t, time.Duration(0), retryAfter)
 	})
 }

@@ -37,9 +37,9 @@ func newACPCmd() *cobra.Command {
 }
 
 func (f *acpFlags) runACPCommand(cmd *cobra.Command, args []string) error {
-	telemetry.TrackCommand("serve", append([]string{"acp"}, args...))
-
 	ctx := cmd.Context()
+	telemetry.TrackCommand(ctx, "serve", append([]string{"acp"}, args...))
+
 	agentFilename := args[0]
 
 	// Expand tilde in session database path

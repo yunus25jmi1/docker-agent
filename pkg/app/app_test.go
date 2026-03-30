@@ -71,46 +71,6 @@ func (m *mockRuntime) Stop()                                   {}
 // Verify mockRuntime implements runtime.Runtime
 var _ runtime.Runtime = (*mockRuntime)(nil)
 
-func TestApp_NewSession_PreservesThinking(t *testing.T) {
-	t.Parallel()
-
-	ctx := t.Context()
-	rt := &mockRuntime{}
-
-	// Create initial session with thinking disabled
-	initialSess := session.New(session.WithThinking(false))
-	require.False(t, initialSess.Thinking, "Initial session should have thinking disabled")
-
-	// Create app with initial session
-	app := New(ctx, rt, initialSess)
-	require.False(t, app.Session().Thinking, "App session should have thinking disabled")
-
-	// Call NewSession - should preserve thinking=false
-	app.NewSession()
-
-	assert.False(t, app.Session().Thinking, "NewSession should preserve thinking=false")
-}
-
-func TestApp_NewSession_PreservesThinkingEnabled(t *testing.T) {
-	t.Parallel()
-
-	ctx := t.Context()
-	rt := &mockRuntime{}
-
-	// Create initial session with thinking enabled (default)
-	initialSess := session.New(session.WithThinking(true))
-	require.True(t, initialSess.Thinking, "Initial session should have thinking enabled")
-
-	// Create app with initial session
-	app := New(ctx, rt, initialSess)
-	require.True(t, app.Session().Thinking, "App session should have thinking enabled")
-
-	// Call NewSession - should preserve thinking=true
-	app.NewSession()
-
-	assert.True(t, app.Session().Thinking, "NewSession should preserve thinking=true")
-}
-
 func TestApp_NewSession_PreservesToolsApproved(t *testing.T) {
 	t.Parallel()
 
@@ -162,8 +122,7 @@ func TestApp_NewSession_WithNilSession(t *testing.T) {
 	app.NewSession()
 
 	require.NotNil(t, app.Session(), "NewSession should create a new session")
-	// Default values
-	assert.False(t, app.Session().Thinking, "NewSession with nil should use default thinking=true")
+	assert.False(t, app.Session().ToolsApproved, "NewSession with nil should use default ToolsApproved=false")
 }
 
 func TestApp_UpdateSessionTitle(t *testing.T) {

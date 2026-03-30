@@ -71,6 +71,15 @@ func TestParseSlashCommand_OtherCommands(t *testing.T) {
 		assert.True(t, ok)
 	})
 
+	t.Run("clear command", func(t *testing.T) {
+		t.Parallel()
+		cmd := ParseSlashCommand("/clear")
+		require.NotNil(t, cmd)
+		msg := cmd()
+		_, ok := msg.(messages.ClearSessionMsg)
+		assert.True(t, ok)
+	})
+
 	t.Run("star command", func(t *testing.T) {
 		t.Parallel()
 		cmd := ParseSlashCommand("/star")

@@ -154,7 +154,7 @@ func (a *Agent) NewSession(ctx context.Context, params acp.NewSessionRequest) (a
 	sessOpts := []session.Opt{
 		session.WithMaxIterations(rootAgent.MaxIterations()),
 		session.WithMaxConsecutiveToolCalls(rootAgent.MaxConsecutiveToolCalls()),
-		session.WithThinking(rootAgent.ThinkingConfigured()),
+		session.WithMaxOldToolCallTokens(rootAgent.MaxOldToolCallTokens()),
 	}
 	if workingDir != "" {
 		sessOpts = append(sessOpts, session.WithWorkingDir(workingDir))
@@ -382,6 +382,9 @@ func (a *Agent) runAgent(ctx context.Context, acpSess *Session) error {
 
 	eventsChan := acpSess.rt.RunStream(ctx, acpSess.sess)
 
+	// Tracks tool call arguments so that we can extract useful information
+	// once the tool call was made.
+	toolCallArgs := map[string]string{}
 	for event := range eventsChan {
 		if ctx.Err() != nil {
 			return ctx.Err()
@@ -411,6 +414,7 @@ func (a *Agent) runAgent(ctx context.Context, acpSess *Session) error {
 			}
 
 		case *runtime.ToolCallEvent:
+			toolCallArgs[e.ToolCall.ID] = e.ToolCall.Function.Arguments
 			if err := a.conn.SessionUpdate(ctx, acp.SessionNotification{
 				SessionId: acp.SessionId(acpSess.id),
 				Update:    buildToolCallStart(e.ToolCall, e.ToolDefinition),
@@ -419,15 +423,21 @@ func (a *Agent) runAgent(ctx context.Context, acpSess *Session) error {
 			}
 
 		case *runtime.ToolCallResponseEvent:
+			args, ok := toolCallArgs[e.ToolCallID]
+			// Should never happen but you know...
+			if !ok {
+				return fmt.Errorf("missing tool call arguments for tool call ID %s", e.ToolCallID)
+			}
+			delete(toolCallArgs, e.ToolCallID)
 			if err := a.conn.SessionUpdate(ctx, acp.SessionNotification{
 				SessionId: acp.SessionId(acpSess.id),
-				Update:    buildToolCallComplete(e.ToolCall, e.Response),
+				Update:    buildToolCallComplete(args, e),
 			}); err != nil {
 				return err
 			}
 
 			// Check if this is a todo tool response and emit plan update
-			if isTodoTool(e.ToolCall.Function.Name) && e.Result != nil && e.Result.Meta != nil {
+			if isTodoTool(e.ToolDefinition.Name) && e.Result != nil && e.Result.Meta != nil {
 				if planUpdate := buildPlanUpdateFromTodos(e.Result.Meta); planUpdate != nil {
 					if err := a.conn.SessionUpdate(ctx, acp.SessionNotification{
 						SessionId: acp.SessionId(acpSess.id),
@@ -666,24 +676,24 @@ func determineToolKind(toolName string, tool tools.Tool) acp.ToolKind {
 }
 
 // buildToolCallComplete creates a tool call completion update
-func buildToolCallComplete(toolCall tools.ToolCall, output string) acp.SessionUpdate {
+func buildToolCallComplete(arguments string, event *runtime.ToolCallResponseEvent) acp.SessionUpdate {
 	// Check if this is a file edit operation and try to extract diff info
-	if isFileEditTool(toolCall.Function.Name) {
-		if diffContent := extractDiffContent(toolCall, output); diffContent != nil {
+	if isFileEditTool(event.ToolDefinition.Name) {
+		if diffContent := extractDiffContent(event.ToolDefinition.Name, arguments); diffContent != nil {
 			return acp.UpdateToolCall(
-				acp.ToolCallId(toolCall.ID),
+				acp.ToolCallId(event.ToolCallID),
 				acp.WithUpdateStatus(acp.ToolCallStatusCompleted),
 				acp.WithUpdateContent([]acp.ToolCallContent{*diffContent}),
-				acp.WithUpdateRawOutput(map[string]any{"content": output}),
+				acp.WithUpdateRawOutput(map[string]any{"content": event.Response}),
 			)
 		}
 	}
 
 	return acp.UpdateToolCall(
-		acp.ToolCallId(toolCall.ID),
+		acp.ToolCallId(event.ToolCallID),
 		acp.WithUpdateStatus(acp.ToolCallStatusCompleted),
-		acp.WithUpdateContent([]acp.ToolCallContent{acp.ToolContent(acp.TextBlock(output))}),
-		acp.WithUpdateRawOutput(map[string]any{"content": output}),
+		acp.WithUpdateContent([]acp.ToolCallContent{acp.ToolContent(acp.TextBlock(event.Response))}),
+		acp.WithUpdateRawOutput(map[string]any{"content": event.Response}),
 	)
 }
 
@@ -693,8 +703,8 @@ func isFileEditTool(toolName string) bool {
 }
 
 // extractDiffContent tries to create a diff content block from edit tool arguments
-func extractDiffContent(toolCall tools.ToolCall, _ string) *acp.ToolCallContent {
-	args := parseToolCallArguments(toolCall.Function.Arguments)
+func extractDiffContent(toolCallName, arguments string) *acp.ToolCallContent {
+	args := parseToolCallArguments(arguments)
 
 	// Get the path from arguments
 	path, ok := args["path"].(string)
@@ -703,7 +713,7 @@ func extractDiffContent(toolCall tools.ToolCall, _ string) *acp.ToolCallContent 
 	}
 
 	// For edit_file, extract the edits
-	if toolCall.Function.Name == "edit_file" {
+	if toolCallName == "edit_file" {
 		edits, ok := args["edits"].([]any)
 		if !ok || len(edits) == 0 {
 			return nil
@@ -735,7 +745,7 @@ func extractDiffContent(toolCall tools.ToolCall, _ string) *acp.ToolCallContent 
 	}
 
 	// For write_file, the entire content is new
-	if toolCall.Function.Name == "write_file" {
+	if toolCallName == "write_file" {
 		if content, ok := args["content"].(string); ok {
 			diff := acp.ToolDiffContent(path, content)
 			return &diff

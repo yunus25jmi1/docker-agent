@@ -12,6 +12,8 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/mattn/go-isatty"
+
 	"github.com/docker/docker-agent/pkg/chat"
 	"github.com/docker/docker-agent/pkg/input"
 	"github.com/docker/docker-agent/pkg/runtime"
@@ -83,8 +85,8 @@ func Run(ctx context.Context, out *Printer, cfg Config, rt runtime.Runtime, sess
 	defer cancel()
 
 	// Ensure telemetry is initialized and add to context so runtime can access it
-	telemetry.EnsureGlobalTelemetryInitialized()
-	if telemetryClient := telemetry.GetGlobalTelemetryClient(); telemetryClient != nil {
+	telemetry.EnsureGlobalTelemetryInitialized(ctx)
+	if telemetryClient := telemetry.GetGlobalTelemetryClient(ctx); telemetryClient != nil {
 		ctx = telemetry.WithClient(ctx, telemetryClient)
 	}
 
@@ -185,9 +187,9 @@ func Run(ctx context.Context, out *Printer, cfg Config, rt runtime.Runtime, sess
 				if cfg.HideToolCalls {
 					continue
 				}
-				out.PrintToolCallResponse(e.ToolCall, e.Response)
+				out.PrintToolCallResponse(e.ToolDefinition.Name, e.Response)
 				// Clear the confirmed ID after the tool completes
-				if e.ToolCall.ID == lastConfirmedToolCallID {
+				if e.ToolCallID == lastConfirmedToolCallID {
 					lastConfirmedToolCallID = ""
 				}
 			case *runtime.ErrorEvent:
@@ -266,6 +268,16 @@ func Run(ctx context.Context, out *Printer, cfg Config, rt runtime.Runtime, sess
 			if err := oneLoop(msg, os.Stdin); err != nil {
 				return err
 			}
+		}
+	case !isatty.IsTerminal(os.Stdin.Fd()):
+		// Stdin is not a terminal: read all input from stdin
+		buf, err := io.ReadAll(os.Stdin)
+		if err != nil {
+			return fmt.Errorf("failed to read from stdin: %w", err)
+		}
+
+		if err := oneLoop(string(buf), os.Stdin); err != nil {
+			return err
 		}
 	default:
 		// No messages: interactive prompt loop

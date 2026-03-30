@@ -169,16 +169,16 @@ agents:
 - Order by preference (best first)
 - Include a cheaper/faster model as last resort
 
-### Use Think Tool for Complex Tasks
+### Use Think Tool for Non-Reasoning Models
 
-The `think` tool dramatically improves reasoning quality with minimal overhead:
+The `think` tool provides a reasoning scratchpad for models that lack built-in thinking capabilities:
 
 ```yaml
 toolsets:
-  - type: think # Always include for complex agents
+  - type: think # Useful for models without native reasoning
 ```
 
-The agent uses it as a scratchpad for planning and decision-making.
+The agent uses it as a scratchpad for planning and decision-making. If your model already supports a [thinking budget]({{ '/configuration/models/#thinking-budget' | relative_url }}) (e.g., Claude with extended thinking, OpenAI o-series, Gemini with thinking enabled), you don't need this tool — the model can reason internally.
 
 ## Security Tips
 
@@ -232,6 +232,26 @@ permissions:
 docker-agent run --sandbox agent.yaml
 ```
 
+### Set Global Permission Guardrails
+
+Use [global permissions]({{ '/configuration/permissions/' | relative_url }}#global-permissions) in your user config to enforce safety rules across every agent:
+
+```yaml
+# ~/.config/cagent/config.yaml
+settings:
+  permissions:
+    deny:
+      - "shell:cmd=sudo*"
+      - "shell:cmd=rm*-rf*"
+      - "shell:cmd=git push --force*"
+    allow:
+      - "read_*"
+      - "shell:cmd=ls*"
+      - "shell:cmd=cat*"
+```
+
+These rules merge with any agent-level permissions. Deny patterns from your global config cannot be overridden by agent configs, so you can trust that dangerous commands stay blocked regardless of which agent you run.
+
 ### Use Hooks for Audit Logging
 
 Log all tool calls for compliance or debugging:
@@ -259,17 +279,19 @@ Understand the difference between `sub_agents` and `handoffs`:
 <div class="cards">
   <div class="card" style="cursor:default;">
     <h3>sub_agents (transfer_task)</h3>
-    <p>Delegates task to a child, waits for result, then continues. The parent remains in control.</p>
+    <p>Delegates task to a child in a sub-session, waits for result, then continues. Hierarchical — the parent remains in control.</p>
     <pre style="margin-top:12px"><code class="language-yaml">sub_agents: [researcher, writer]</code></pre>
   </div>
   <div class="card" style="cursor:default;">
-    <h3>handoffs (A2A)</h3>
-    <p>Transfers control entirely to another agent (possibly remote). One-way handoff.</p>
+    <h3>handoffs (peer-to-peer)</h3>
+    <p>Hands off the entire conversation to another agent in the same session. The active agent switches and sees the full history. Agents can form cycles.</p>
     <pre style="margin-top:12px"><code class="language-yaml">handoffs:
   - specialist
-  - namespace/remote-agent</code></pre>
+  - summarizer</code></pre>
   </div>
 </div>
+
+See <a href="{{ '/concepts/multi-agent/' | relative_url }}">Multi-Agent Systems</a> for a detailed comparison.
 
 ### Give Sub-Agents Clear Descriptions
 

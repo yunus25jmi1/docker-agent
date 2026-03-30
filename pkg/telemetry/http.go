@@ -34,6 +34,7 @@ func (tc *Client) createEvent(eventName string, properties map[string]any) Event
 
 	// Add system metadata AFTER tags so they cannot be overwritten
 	allProperties["user_uuid"] = tc.userUUID
+	allProperties["desktop_uuid"] = tc.desktopUUID
 	allProperties["version"] = tc.getVersion()
 	allProperties["os"] = osInfo
 	allProperties["os_language"] = osLanguage

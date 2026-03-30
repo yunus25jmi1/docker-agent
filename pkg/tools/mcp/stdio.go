@@ -13,6 +13,7 @@ import (
 
 type stdioMCPClient struct {
 	sessionClient
+
 	command string
 	args    []string
 	env     []string

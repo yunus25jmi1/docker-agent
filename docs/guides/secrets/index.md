@@ -1,0 +1,206 @@
+---
+title: "Managing Secrets"
+description: "How to securely provide API keys and credentials to docker-agent using environment variables, env files, Docker Compose secrets, macOS Keychain, and pass."
+permalink: /guides/secrets/
+---
+
+# Managing Secrets
+
+_How to securely provide API keys and credentials to docker-agent._
+
+## Overview
+
+docker-agent needs API keys to talk to model providers (OpenAI, Anthropic, etc.) and MCP tool servers (GitHub, Slack, etc.). These keys are **never stored in config files**. Instead, docker-agent resolves them at runtime through a chain of secret providers, checked in order:
+
+| Priority | Provider | Description |
+| --- | --- | --- |
+| 1 | [Environment variables](#environment-variables) | `export OPENAI_API_KEY=sk-...` |
+| 2 | [Docker secrets](#docker-compose-secrets) | Files in `/run/secrets/` |
+| 3 | [`pass` password manager](#pass-password-manager) | `pass insert OPENAI_API_KEY` |
+| 4 | [macOS Keychain](#macos-keychain) | `security add-generic-password` |
+
+The first provider that has a value wins. You can mix and match — for example, use environment variables for one key and Keychain for another.
+
+## Environment Variables
+
+The simplest approach. Set variables in your shell before running docker-agent:
+
+```bash
+export OPENAI_API_KEY=sk-...
+export ANTHROPIC_API_KEY=sk-ant-...
+docker agent run agent.yaml
+```
+
+Common variables:
+
+| Variable | Provider |
+| --- | --- |
+| `OPENAI_API_KEY` | OpenAI |
+| `ANTHROPIC_API_KEY` | Anthropic |
+| `GOOGLE_API_KEY` | Google Gemini |
+| `MISTRAL_API_KEY` | Mistral |
+| `XAI_API_KEY` | xAI |
+| `NEBIUS_API_KEY` | Nebius |
+
+MCP tools may require additional variables. For example, the GitHub MCP server needs `GITHUB_PERSONAL_ACCESS_TOKEN`. These are passed to tools via the `env` field in your config:
+
+```yaml
+toolsets:
+  - type: mcp
+    ref: docker:github-official
+    env:
+      GITHUB_PERSONAL_ACCESS_TOKEN: $GITHUB_PERSONAL_ACCESS_TOKEN
+```
+
+## Env Files
+
+For convenience, you can store secrets in a `.env` file and pass it to docker-agent with `--env-from-file`:
+
+```bash
+# .env
+OPENAI_API_KEY=sk-...
+ANTHROPIC_API_KEY=sk-ant-...
+GITHUB_PERSONAL_ACCESS_TOKEN=ghp_...
+```
+
+```bash
+docker agent run agent.yaml --env-from-file .env
+```
+
+The file format supports:
+
+- `KEY=VALUE` pairs, one per line
+- Comments starting with `#`
+- Quoted values: `KEY="value with spaces"`
+- Blank lines are ignored
+
+<div class="callout callout-warning">
+<div class="callout-title">⚠️ Important</div>
+<p>Add <code>.env</code> to your <code>.gitignore</code> to avoid committing secrets to version control.</p>
+</div>
+
+## Docker Compose Secrets
+
+When running docker-agent in a container with Docker Compose, you can use [Compose secrets](https://docs.docker.com/compose/how-tos/use-secrets/) to inject credentials securely. Compose mounts secrets as files under `/run/secrets/`, and docker-agent reads from this location automatically.
+
+### From a file
+
+Store each secret in its own file, then reference it in `compose.yaml`:
+
+```bash
+echo -n "sk-ant-your-key-here" > .anthropic_api_key
+```
+
+```yaml
+# compose.yaml
+services:
+  agent:
+    image: docker/docker-agent
+    command: run --exec /app/agent.yaml "Hello!"
+    secrets:
+      - ANTHROPIC_API_KEY
+    volumes:
+      - ./agent.yaml:/app/agent.yaml:ro
+
+secrets:
+  ANTHROPIC_API_KEY:
+    file: ./.anthropic_api_key
+```
+
+Docker Compose mounts the file as `/run/secrets/ANTHROPIC_API_KEY`. docker-agent picks it up with no extra configuration.
+
+### From a host environment variable
+
+In CI/CD pipelines, secrets are often injected as environment variables. Compose can forward these to `/run/secrets/`:
+
+```yaml
+secrets:
+  ANTHROPIC_API_KEY:
+    environment: "ANTHROPIC_API_KEY"
+```
+
+### Multiple secrets
+
+```yaml
+services:
+  agent:
+    image: docker/docker-agent
+    command: run --exec /app/agent.yaml "Summarize my GitHub issues"
+    secrets:
+      - ANTHROPIC_API_KEY
+      - GITHUB_PERSONAL_ACCESS_TOKEN
+    volumes:
+      - ./agent.yaml:/app/agent.yaml:ro
+
+secrets:
+  ANTHROPIC_API_KEY:
+    file: ./.anthropic_api_key
+  GITHUB_PERSONAL_ACCESS_TOKEN:
+    file: ./.github_token
+```
+
+### Why use Compose secrets over environment variables?
+
+| Aspect | Environment Variables | Compose Secrets |
+| --- | --- | --- |
+| Storage | In memory, visible via `docker inspect` | Mounted as tmpfs files under `/run/secrets/` |
+| Visibility | Shown in process list and inspect output | Not exposed in `docker inspect` |
+| Best for | Development | Production and CI/CD |
+
+## `pass` Password Manager
+
+docker-agent integrates with [`pass`](https://www.passwordstore.org/), the standard Unix password manager. Secrets are stored as GPG-encrypted files in `~/.password-store/`.
+
+### Store a secret
+
+```bash
+pass insert ANTHROPIC_API_KEY
+```
+
+The entry name must match the environment variable name that docker-agent expects.
+
+### Verify it works
+
+```bash
+pass show ANTHROPIC_API_KEY
+```
+
+Once `pass` is set up, docker-agent resolves secrets from it automatically.
+
+## macOS Keychain
+
+On macOS, docker-agent can read secrets from the system Keychain. This is useful for local development — you store the key once and it's available across all your projects.
+
+### Store a secret
+
+```bash
+security add-generic-password -a "$USER" -s ANTHROPIC_API_KEY -w "sk-ant-your-key-here"
+```
+
+The `-s` (service name) must match the environment variable name that docker-agent expects.
+
+### Verify it works
+
+```bash
+security find-generic-password -s ANTHROPIC_API_KEY -w
+```
+
+### Delete a secret
+
+```bash
+security delete-generic-password -s ANTHROPIC_API_KEY
+```
+
+Once stored, docker-agent finds the secret automatically — no flags or config needed.
+
+## Choosing a Method
+
+| Method | Best for | Setup effort |
+| --- | --- | --- |
+| Environment variables | Quick local development, scripts | Low |
+| Env files | Team projects, multiple keys | Low |
+| Docker Compose secrets | Containerized deployments, CI/CD | Medium |
+| `pass` | Linux/macOS, GPG-based workflows | Medium |
+| macOS Keychain | macOS local development | Low |
+
+You can combine methods. For example, store long-lived provider keys in macOS Keychain and pass project-specific MCP tokens via env files.

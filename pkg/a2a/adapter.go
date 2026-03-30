@@ -47,6 +47,7 @@ func runDockerAgent(ctx agent.InvocationContext, t *team.Team, agentName string,
 			session.WithUserMessage(message),
 			session.WithMaxIterations(a.MaxIterations()),
 			session.WithMaxConsecutiveToolCalls(a.MaxConsecutiveToolCalls()),
+			session.WithMaxOldToolCallTokens(a.MaxOldToolCallTokens()),
 			session.WithToolsApproved(true),
 		)
 

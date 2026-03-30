@@ -19,7 +19,18 @@ Permissions provide fine-grained control over tool execution. You can configure 
 
 </div>
 
-## Configuration
+## Permission Levels
+
+Permissions can be defined at two levels:
+
+| Level | Location | Scope |
+| ----- | -------- | ----- |
+| **Agent-level** | Agent YAML config (`permissions:` section) | Applies to that specific agent config |
+| **Global (user-level)** | `~/.config/cagent/config.yaml` under `settings.permissions` | Applies to every agent you run |
+
+Both levels use the same `allow`/`ask`/`deny` pattern syntax. When both are present, they are **merged** at startup -- patterns from both sources are combined into a single checker. See [Merging Behavior](#merging-behavior) for details.
+
+## Agent-Level Configuration
 
 ```yaml
 agents:
@@ -41,6 +52,42 @@ permissions:
     - "shell:cmd=rm*-rf*"
     - "dangerous_tool"
 ```
+
+## Global Permissions
+
+Global permissions let you enforce rules across **all** agents, regardless of which agent config you run. Define them in your user config file:
+
+```yaml
+# ~/.config/cagent/config.yaml
+settings:
+  permissions:
+    deny:
+      - "shell:cmd=sudo*"
+      - "shell:cmd=rm*-rf*"
+    allow:
+      - "read_*"
+      - "shell:cmd=ls*"
+      - "shell:cmd=cat*"
+```
+
+This is useful for setting personal safety guardrails that apply everywhere -- for example, always blocking `sudo` or always auto-approving read-only tools -- without relying on each agent config to include those rules.
+
+### Merging Behavior
+
+When both global and agent-level permissions are present, they are merged into a single set of patterns before evaluation. The merge works as follows:
+
+- **Deny patterns from either source block the tool.** A global deny cannot be overridden by an agent-level allow, and vice versa.
+- **Allow patterns from either source auto-approve the tool** (as long as no deny pattern matches).
+- **Ask patterns from either source force confirmation** (as long as no deny or allow pattern matches).
+
+The evaluation order remains the same after merging: **Deny > Allow > Ask > default Ask**.
+
+<div class="callout callout-tip">
+<div class="callout-title">Example: Global deny + agent allow
+</div>
+  <p>If your global config denies <code>shell:cmd=sudo*</code> and an agent config allows <code>shell:cmd=sudo apt update</code>, the deny wins. Deny patterns always take priority regardless of source.</p>
+
+</div>
 
 ## Pattern Syntax
 

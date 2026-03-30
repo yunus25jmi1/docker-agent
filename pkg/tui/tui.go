@@ -103,8 +103,6 @@ type appModel struct {
 	wWidth, wHeight int
 	width, height   int
 
-	cancelThinkingCheck context.CancelFunc // cancels the in-flight thinking toggle check
-
 	// Content area height (height minus editor, tab bar, resize handle, status bar)
 	contentHeight int
 
@@ -704,6 +702,10 @@ func (m *appModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// /new spawns a new tab when a session spawner is configured.
 		return m.handleSpawnSession("")
 
+	case messages.ClearSessionMsg:
+		// /clear resets the current tab with a fresh session in the same working dir.
+		return m.handleClearSession()
+
 	// --- Exit ---
 
 	case messages.ExitSessionMsg:
@@ -755,12 +757,6 @@ func (m *appModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case messages.ToggleYoloMsg:
 		return m.handleToggleYolo()
 
-	case messages.ToggleThinkingMsg:
-		return m.handleToggleThinking()
-
-	case messages.ToggleThinkingResultMsg:
-		return m.handleToggleThinkingResult(msg)
-
 	case messages.ToggleHideToolResultsMsg:
 		return m.handleToggleHideToolResults()
 
@@ -809,6 +805,9 @@ func (m *appModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case messages.ShowPermissionsDialogMsg:
 		return m.handleShowPermissionsDialog()
+
+	case messages.ShowToolsDialogMsg:
+		return m.handleShowToolsDialog()
 
 	case messages.AgentCommandMsg:
 		return m.handleAgentCommand(msg.Command)
@@ -1088,10 +1087,7 @@ func (m *appModel) replaceActiveSession(ctx context.Context, sess *session.Sessi
 
 	slog.Debug("Replacing empty session in-place", "tab_id", activeID, "loaded_session", sess.ID)
 
-	// Cleanup old chat page and editor for the active session
-	if cp, ok := m.chatPages[activeID]; ok {
-		cp.Cleanup()
-	}
+	// Cleanup old editor for the active session
 	if ed, ok := m.editors[activeID]; ok {
 		ed.Cleanup()
 	}
@@ -1125,6 +1121,46 @@ func (m *appModel) replaceActiveSession(ctx context.Context, sess *session.Sessi
 
 	cmd := m.initAndFocusComponents()
 	return m, cmd
+}
+
+// handleClearSession resets the current tab by creating a fresh session
+// in the same working directory.
+func (m *appModel) handleClearSession() (tea.Model, tea.Cmd) {
+	activeID := m.supervisor.ActiveID()
+
+	// Cleanup old editor for the active session.
+	if ed, ok := m.editors[activeID]; ok {
+		ed.Cleanup()
+	}
+
+	// Create a fresh session in the same app, preserving the working dir.
+	m.application.NewSession()
+	newSess := m.application.Session()
+
+	// Rebuild all per-session UI components.
+	m.initSessionComponents(activeID, m.application, newSess)
+	m.dialogMgr = dialog.New()
+	m.supervisor.SetRunnerTitle(activeID, "")
+	m.sessionState.SetSessionTitle("")
+	m.sessionState.SetPreviousMessage(nil)
+
+	// Update persisted tab to point to the new session.
+	if m.tuiStore != nil {
+		ctx := context.Background()
+		oldPersistedID := m.persistedSessionID(activeID)
+		if err := m.tuiStore.UpdateTabSessionID(ctx, oldPersistedID, newSess.ID); err != nil {
+			slog.Warn("Failed to update tab session ID after clear", "error", err)
+		}
+	}
+	m.persistActiveTab(newSess.ID)
+
+	m.reapplyKeyboardEnhancements()
+
+	return m, tea.Sequence(
+		m.chatPage.Init(),
+		m.resizeAll(),
+		m.editor.Focus(),
+	)
 }
 
 // handleSpawnSession spawns a new session.
@@ -1361,10 +1397,7 @@ func (m *appModel) handleCloseTab(sessionID string) (tea.Model, tea.Cmd) {
 	nextActiveID := m.supervisor.CloseSession(sessionID)
 
 	// Clean up per-session state
-	if cp, ok := m.chatPages[sessionID]; ok {
-		cp.Cleanup()
-		delete(m.chatPages, sessionID)
-	}
+	delete(m.chatPages, sessionID)
 	if ed, ok := m.editors[sessionID]; ok {
 		ed.Cleanup()
 		delete(m.editors, sessionID)
@@ -2056,20 +2089,31 @@ func (m *appModel) windowTitle() string {
 	return title
 }
 
+// exitFunc is the function called by the shutdown safety net when the
+// graceful exit times out. It defaults to os.Exit but can be replaced
+// in tests.
+var exitFunc = os.Exit
+
+var shutdownTimeout = 5 * time.Second
+
 // cleanupAll cleans up all sessions, editors, and resources.
 func (m *appModel) cleanupAll() {
-	if m.cancelThinkingCheck != nil {
-		m.cancelThinkingCheck()
-		m.cancelThinkingCheck = nil
-	}
 	m.transcriber.Stop()
 	m.closeTranscriptCh()
-	for _, cp := range m.chatPages {
-		cp.Cleanup()
-	}
 	for _, ed := range m.editors {
 		ed.Cleanup()
 	}
+
+	// Safety net: force-exit if bubbletea's shutdown gets stuck.
+	// This can happen when the renderer's flush goroutine blocks on a
+	// stdout write (terminal buffer full) while holding the renderer
+	// mutex, preventing the event loop from completing the render call
+	// that follows tea.Quit.
+	go func() {
+		time.Sleep(shutdownTimeout)
+		slog.Warn("Graceful shutdown timed out, forcing exit")
+		exitFunc(0)
+	}()
 }
 
 // persistedSessionID returns the session-store ID that should be used for

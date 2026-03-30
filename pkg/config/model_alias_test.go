@@ -16,8 +16,6 @@ func TestResolveModelAliases(t *testing.T) {
 	mockData := &modelsdev.Database{
 		Providers: map[string]modelsdev.Provider{
 			"anthropic": {
-				ID:   "anthropic",
-				Name: "Anthropic",
 				Models: map[string]modelsdev.Model{
 					"claude-sonnet-4-5":          {Name: "Claude Sonnet 4.5 (latest)"},
 					"claude-sonnet-4-5-20250929": {Name: "Claude Sonnet 4.5"},
@@ -47,7 +45,7 @@ func TestResolveModelAliases(t *testing.T) {
 			},
 		},
 		{
-			name: "resolves inline model in agent",
+			name: "does not resolve inline model in agent",
 			cfg: &latest.Config{
 				Models: map[string]latest.ModelConfig{},
 				Agents: []latest.AgentConfig{
@@ -57,7 +55,7 @@ func TestResolveModelAliases(t *testing.T) {
 			expected: &latest.Config{
 				Models: map[string]latest.ModelConfig{},
 				Agents: []latest.AgentConfig{
-					{Name: "root", Model: "anthropic/claude-sonnet-4-5-20250929"},
+					{Name: "root", Model: "anthropic/claude-sonnet-4-5"},
 				},
 			},
 		},
@@ -109,7 +107,7 @@ func TestResolveModelAliases(t *testing.T) {
 			},
 		},
 		{
-			name: "handles comma-separated models",
+			name: "does not resolve comma-separated inline models in agent",
 			cfg: &latest.Config{
 				Models: map[string]latest.ModelConfig{},
 				Agents: []latest.AgentConfig{
@@ -119,7 +117,7 @@ func TestResolveModelAliases(t *testing.T) {
 			expected: &latest.Config{
 				Models: map[string]latest.ModelConfig{},
 				Agents: []latest.AgentConfig{
-					{Name: "root", Model: "anthropic/claude-sonnet-4-5-20250929,my_ref"},
+					{Name: "root", Model: "anthropic/claude-sonnet-4-5,my_ref"},
 				},
 			},
 		},

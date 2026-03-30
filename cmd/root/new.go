@@ -51,9 +51,8 @@ Optionally provide a description as an argument to skip the initial prompt.`,
 }
 
 func (f *newFlags) runNewCommand(cmd *cobra.Command, args []string) error {
-	telemetry.TrackCommand("new", args)
-
 	ctx := cmd.Context()
+	telemetry.TrackCommand(ctx, "new", args)
 
 	t, err := creator.Agent(ctx, &f.runConfig, f.modelParam)
 	if err != nil {

@@ -1,6 +1,8 @@
 package builtin
 
 import (
+	"cmp"
+	"slices"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -29,7 +31,7 @@ func TestRAGTool_ToolName(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			tool := &RAGTool{
 				toolName: tt.toolName,
-				manager:  nil, // We don't need a real manager for name tests
+				manager:  nil,
 			}
 
 			tools, err := tool.Tools(t.Context())
@@ -50,28 +52,21 @@ func TestRAGTool_DefaultDescription(t *testing.T) {
 	tools, err := tool.Tools(t.Context())
 	require.NoError(t, err)
 	require.Len(t, tools, 1)
-
-	// Should contain the tool name in the description
 	assert.Contains(t, tools[0].Description, "test_docs")
 }
 
 func TestRAGTool_SortResults(t *testing.T) {
-	results := []QueryResult{
+	results := []queryResult{
 		{SourcePath: "a.txt", Similarity: 0.5},
 		{SourcePath: "b.txt", Similarity: 0.9},
 		{SourcePath: "c.txt", Similarity: 0.3},
 		{SourcePath: "d.txt", Similarity: 0.7},
 	}
 
-	sortResults(results)
+	slices.SortFunc(results, func(a, b queryResult) int {
+		return cmp.Compare(b.Similarity, a.Similarity)
+	})
 
-	// Should be sorted by similarity in descending order
-	assert.InDelta(t, 0.9, results[0].Similarity, 0.001)
-	assert.InDelta(t, 0.7, results[1].Similarity, 0.001)
-	assert.InDelta(t, 0.5, results[2].Similarity, 0.001)
-	assert.InDelta(t, 0.3, results[3].Similarity, 0.001)
-
-	// Verify the source paths match
 	assert.Equal(t, "b.txt", results[0].SourcePath)
 	assert.Equal(t, "d.txt", results[1].SourcePath)
 	assert.Equal(t, "a.txt", results[2].SourcePath)
