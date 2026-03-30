@@ -109,3 +109,34 @@ func TestStoreResolution(t *testing.T) {
 		assert.NotNil(t, img)
 	}
 }
+
+func TestStoreResolution_DigestReference(t *testing.T) {
+	store, err := NewStore(WithBaseDir(t.TempDir()))
+	require.NoError(t, err)
+
+	testData := []byte("Digest resolution test")
+	layer := static.NewLayer(testData, types.OCIUncompressedLayer)
+	img := empty.Image
+	img, err = mutate.AppendLayers(img, layer)
+	require.NoError(t, err)
+
+	tagRef := "myrepo/agent:v1"
+	digest, err := store.StoreArtifact(img, tagRef)
+	require.NoError(t, err)
+
+	// Bare digest should resolve.
+	retrievedImg, err := store.GetArtifactImage(digest)
+	require.NoError(t, err)
+	assert.NotNil(t, retrievedImg)
+
+	// Digest reference (repo@sha256:...) should also resolve.
+	digestRef := "myrepo/agent@" + digest
+	retrievedImg, err = store.GetArtifactImage(digestRef)
+	require.NoError(t, err)
+	assert.NotNil(t, retrievedImg)
+
+	// Metadata lookup via digest reference should work too.
+	meta, err := store.GetArtifactMetadata(digestRef)
+	require.NoError(t, err)
+	assert.Equal(t, digest, meta.Digest)
+}

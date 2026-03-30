@@ -95,7 +95,6 @@ type Page interface {
 	layout.Sizeable
 	layout.Help
 	CompactSession(additionalPrompt string) tea.Cmd
-	Cleanup()
 	// SetSessionStarred updates the sidebar star indicator
 	SetSessionStarred(starred bool)
 	// SetTitleRegenerating sets the title regenerating state on the sidebar
@@ -897,10 +896,6 @@ func (p *chatPage) CompactSession(additionalPrompt string) tea.Cmd {
 		p.setPendingResponse(true),
 		p.messages.ScrollToBottom(),
 	)
-}
-
-func (p *chatPage) Cleanup() {
-	p.sidebar.Cleanup()
 }
 
 // SetSessionStarred updates the sidebar star indicator

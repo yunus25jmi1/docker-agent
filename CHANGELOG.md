@@ -3,6 +3,213 @@
 All notable changes to this project will be documented in this file.
 
 
+## [v1.39.0] - 2026-03-27
+
+This release adds new color themes for the terminal interface and includes internal version management updates.
+
+## What's New
+- Adds Calm Roots theme with warm white accents, sage green info messages, and charcoal background
+- Adds Neon Pink theme with vibrant pink tones and high-contrast white accents for readability
+
+## Technical Changes
+- Freezes v7 version
+- Updates CHANGELOG.md for v1.38.0
+
+### Pull Requests
+
+- [#2256](https://github.com/docker/docker-agent/pull/2256) - docs: update CHANGELOG.md for v1.38.0
+- [#2260](https://github.com/docker/docker-agent/pull/2260) - Add Calm Roots and Neon Pink themes
+- [#2264](https://github.com/docker/docker-agent/pull/2264) - Freeze v7
+
+
+## [v1.38.0] - 2026-03-26
+
+This release improves OAuth configuration and fixes tool caching issues with remote MCP server reconnections.
+
+## Improvements
+
+- Changes OAuth client name to "docker-agent" for better identification
+- Reworks compaction logic to prevent infinite loops when context overflow errors occur repeatedly
+
+## Bug Fixes
+
+- Fixes tool cache not refreshing after remote MCP server reconnects, ensuring updated tools are available after server restarts
+
+## Technical Changes
+
+- Updates CHANGELOG.md for v1.37.0 release documentation
+
+### Pull Requests
+
+- [#2242](https://github.com/docker/docker-agent/pull/2242) - Refactor compaction
+- [#2243](https://github.com/docker/docker-agent/pull/2243) - docs: update CHANGELOG.md for v1.37.0
+- [#2245](https://github.com/docker/docker-agent/pull/2245) - Change the oauth client name to docker-agent
+- [#2246](https://github.com/docker/docker-agent/pull/2246) - fix: refresh tool and prompt caches after remote MCP server reconnect
+
+
+## [v1.37.0] - 2026-03-25
+
+This release adds support for forwarding sampling parameters to provider APIs, introduces global user-level permissions, and includes several bug fixes and improvements.
+
+## What's New
+
+- Adds support for forwarding sampling provider options (top_k, repetition_penalty, etc.) to provider APIs
+- Adds global-level permissions from user config that apply across all sessions and agents
+- Adds a welcome message to the interface
+- Adds custom linter to enforce config version import chain
+
+## Improvements
+
+- Refactors RAG from agent-level config to standard toolset type for consistency with other toolsets
+- Restores RAG indexing event forwarding to TUI after toolset refactor
+- Simplifies RAG event forwarding and cleans up RAGTool
+
+## Bug Fixes
+
+- Fixes Bedrock interleaved_thinking defaults to true and adds logging for provider_opts mismatches
+- Fixes issue where CacheControl markers were preserved during message compaction, exceeding Anthropic's limit
+- Fixes tool loop detector by resetting it after degenerate loop error
+- Fixes desktop proxy socket name on WSL where http-proxy socket is not allowed for users
+
+## Technical Changes
+
+- Documents max_old_tool_call_tokens and max_consecutive_tool_calls in agent config reference
+- Documents global permissions from user config in permissions reference and guides
+- Pins GitHub actions for improved security
+- Updates cagent-action to latest version with better permissions
+
+### Pull Requests
+
+- [#2210](https://github.com/docker/docker-agent/pull/2210) - Refactor RAG from agent-level config to standard toolset type
+- [#2225](https://github.com/docker/docker-agent/pull/2225) - Add custom linter to enforce config version import chain
+- [#2226](https://github.com/docker/docker-agent/pull/2226) - feat: forward sampling provider_opts (top_k, repetition_penalty) to provider APIs
+- [#2227](https://github.com/docker/docker-agent/pull/2227) - docs: update CHANGELOG.md for v1.36.1
+- [#2229](https://github.com/docker/docker-agent/pull/2229) - docs: add max_old_tool_call_tokens and max_consecutive_tool_calls to agent config reference
+- [#2230](https://github.com/docker/docker-agent/pull/2230) - Add global-level permissions from user config
+- [#2231](https://github.com/docker/docker-agent/pull/2231) - Pin GitHub actions
+- [#2233](https://github.com/docker/docker-agent/pull/2233) - update cagent-action to latest (with better permissions)
+- [#2236](https://github.com/docker/docker-agent/pull/2236) - fix: strip CacheControl from messages during compaction
+- [#2237](https://github.com/docker/docker-agent/pull/2237) - Reset tool loop detector after degenerate loop error
+- [#2238](https://github.com/docker/docker-agent/pull/2238) - Bump direct Go module dependencies
+- [#2240](https://github.com/docker/docker-agent/pull/2240) - Fix desktop proxy socket name on WSL
+- [#2241](https://github.com/docker/docker-agent/pull/2241) - docs: document global permissions from user config
+
+
+## [v1.36.1] - 2026-03-23
+
+This release improves OCI reference handling, adds a tools command, and enhances MCP server reliability with better error recovery.
+
+## What's New
+- Adds `/tools` command to show available tools in a TUI dialog
+- Adds support for serving digest-pinned OCI references directly from cache
+
+## Improvements
+- Uses Docker Desktop proxy for all HTTP operations when Docker Desktop is running
+- Improves MCP server reconnection by retrying tool calls on any connection error, not just session errors
+- Normalizes OCI reference handling in store lookups to match Pull() key format
+
+## Bug Fixes
+- Fixes `/clear` command to properly re-initialize the TUI
+- Fixes tools/permissions dialog height instability when scrolling
+- Fixes empty lines in tools dialog from multiline descriptions
+- Fixes relative path resolution when parentDir is empty by falling back to current working directory
+
+## Technical Changes
+- Extracts RAG code for better organization
+- Removes model alias resolution for inline agent model references
+- Sets missing category on MCP and script shell tools
+- Removes dead code and unused agent event handling
+- Enables additional linters (bodyclose, makezero, sqlclosecheck) with corresponding fixes
+- Adds comprehensive Managing Secrets documentation guide
+
+### Pull Requests
+
+- [#2201](https://github.com/docker/docker-agent/pull/2201) - docs: update CHANGELOG.md for v1.36.0
+- [#2204](https://github.com/docker/docker-agent/pull/2204) - Better oci refs
+- [#2205](https://github.com/docker/docker-agent/pull/2205) - Simplify the runtime related RAG code a bit
+- [#2206](https://github.com/docker/docker-agent/pull/2206) - Remove model alias resolution for inline agent model references
+- [#2207](https://github.com/docker/docker-agent/pull/2207) - Fix /clear
+- [#2209](https://github.com/docker/docker-agent/pull/2209) - Add /tools command to show the available tools
+- [#2212](https://github.com/docker/docker-agent/pull/2212) - fix: recover from ErrSessionMissing when remote MCP server restarts
+- [#2213](https://github.com/docker/docker-agent/pull/2213) - docs: clarify :agent and :name parameters in API server endpoints
+- [#2215](https://github.com/docker/docker-agent/pull/2215) - fix: retry MCP callTool on any connection error, not just ErrSessionMissing
+- [#2217](https://github.com/docker/docker-agent/pull/2217) - docs: add Managing Secrets guide
+- [#2218](https://github.com/docker/docker-agent/pull/2218) - Bump Go dependencies
+- [#2219](https://github.com/docker/docker-agent/pull/2219) - Enable bodyclose, makezero, and sqlclosecheck linters
+- [#2221](https://github.com/docker/docker-agent/pull/2221) - fix: resolve relative paths against CWD when parentDir is empty
+- [#2222](https://github.com/docker/docker-agent/pull/2222) - Use Docker Desktop proxy when available
+- [#2224](https://github.com/docker/docker-agent/pull/2224) - Make run.go easier to read
+
+
+## [v1.36.0] - 2026-03-20
+
+This release adds WebSocket transport support for OpenAI streaming, introduces configurable tool call token limits, and improves the command-line interface with new session management capabilities.
+
+## What's New
+
+- Adds WebSocket transport option for OpenAI Responses API streaming as an alternative to SSE
+- Adds `/clear` command to reset current tab with a new session
+- Adds configurable `max_old_tool_call_tokens` setting in agent YAML to control historical tool call content retention
+
+## Improvements
+
+- Hides agent name header when stdout is not a TTY for cleaner piped output
+- Sorts all slash commands by label and hides `/q` alias from dialogs, showing only `/exit` and `/quit`
+- Injects `lastResponseID` as `previous_response_id` in WebSocket requests for better continuity
+
+## Bug Fixes
+
+- Fixes data race on WebSocket pool lazy initialization
+- Fixes panic in WebSocket handling
+
+## Technical Changes
+
+- Removes legacy `syncMessagesColumn` and messages JSON column from database schema
+- Simplifies WebSocket pool code structure
+- Documents external OCI registry agents usage as sub-agents
+
+### Pull Requests
+
+- [#2186](https://github.com/docker/docker-agent/pull/2186) - Add WebSocket transport for OpenAI Responses API streaming
+- [#2192](https://github.com/docker/docker-agent/pull/2192) - feat: make maxOldToolCallTokens configurable in agent YAML
+- [#2195](https://github.com/docker/docker-agent/pull/2195) - docs: document external OCI registry agents as sub-agents
+- [#2196](https://github.com/docker/docker-agent/pull/2196) - Remove syncMessagesColumn and legacy messages JSON column
+- [#2197](https://github.com/docker/docker-agent/pull/2197) - Support `echo "hello" | docker agent | cat`
+- [#2199](https://github.com/docker/docker-agent/pull/2199) - Add /clear command to reset current tab with a new session
+- [#2200](https://github.com/docker/docker-agent/pull/2200) - Hide /q from dialogs and sort all commands by label
+
+
+## [v1.34.0] - 2026-03-19
+
+This release improves tool call handling and evaluation functionality with several technical fixes and optimizations.
+
+## Improvements
+
+- Optimizes partial tool call streaming by sending only delta arguments instead of accumulated arguments
+- Reduces evaluation summary display width for better terminal formatting
+- Includes tool definition only on the first partial tool call to reduce redundancy
+
+## Bug Fixes
+
+- Fixes schema conversion for OpenAI Responses API strict mode, resolving issues with gpt-4.1-nano
+- Removes duplicate tool call data from tool call response events to reduce payload size
+
+## Technical Changes
+
+- Updates evaluation system to not provide all API keys when using models gateway
+- Removes redundant tool call information from response events while preserving tool call IDs for client reference
+
+### Pull Requests
+
+- [#2105](https://github.com/docker/docker-agent/pull/2105) - Only send the delta on the partial tool call
+- [#2159](https://github.com/docker/docker-agent/pull/2159) - docs: update CHANGELOG.md for v1.33.0
+- [#2160](https://github.com/docker/docker-agent/pull/2160) - Fix (reduce) evals summary width
+- [#2162](https://github.com/docker/docker-agent/pull/2162) - Evals: don't provide all API keys when using models gateway
+- [#2163](https://github.com/docker/docker-agent/pull/2163) - Remove the tool call from the tool call response event
+- [#2164](https://github.com/docker/docker-agent/pull/2164) - build(deps): bump google.golang.org/grpc from 1.79.2 to 1.79.3 in the go_modules group across 1 directory
+- [#2168](https://github.com/docker/docker-agent/pull/2168) - Fix schema conversion for OpenAI Responses API strict mode - Fixes tool calls with gpt-4.1-nano
+
+
 ## [v1.33.0] - 2026-03-18
 
 This release improves file editing reliability, adds session exit keywords, and fixes several issues with sub-sessions and evaluation handling.
@@ -1439,3 +1646,15 @@ This release improves the terminal user interface with better error handling and
 [v1.32.5]: https://github.com/docker/docker-agent/releases/tag/v1.32.5
 
 [v1.33.0]: https://github.com/docker/docker-agent/releases/tag/v1.33.0
+
+[v1.34.0]: https://github.com/docker/docker-agent/releases/tag/v1.34.0
+
+[v1.36.0]: https://github.com/docker/docker-agent/releases/tag/v1.36.0
+
+[v1.36.1]: https://github.com/docker/docker-agent/releases/tag/v1.36.1
+
+[v1.37.0]: https://github.com/docker/docker-agent/releases/tag/v1.37.0
+
+[v1.38.0]: https://github.com/docker/docker-agent/releases/tag/v1.38.0
+
+[v1.39.0]: https://github.com/docker/docker-agent/releases/tag/v1.39.0

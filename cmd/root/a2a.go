@@ -36,9 +36,9 @@ func newA2ACmd() *cobra.Command {
 }
 
 func (f *a2aFlags) runA2ACommand(cmd *cobra.Command, args []string) error {
-	telemetry.TrackCommand("serve", append([]string{"a2a"}, args...))
-
 	ctx := cmd.Context()
+	telemetry.TrackCommand(ctx, "serve", append([]string{"a2a"}, args...))
+
 	out := cli.NewPrinter(cmd.OutOrStdout())
 	agentFilename := args[0]
 

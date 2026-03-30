@@ -1,4 +1,3 @@
-// Package messages defines all TUI message types organized by domain.
 package messages
 
 import "github.com/docker/docker-agent/pkg/session"
@@ -25,6 +24,10 @@ type Attachment struct {
 type (
 	// NewSessionMsg requests creation of a new session.
 	NewSessionMsg struct{}
+
+	// ClearSessionMsg resets the current tab and starts a new session
+	// in the same working directory.
+	ClearSessionMsg struct{}
 
 	// ExitSessionMsg requests exiting the current session.
 	ExitSessionMsg struct{}

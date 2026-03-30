@@ -15,7 +15,6 @@ import (
 	"github.com/docker/docker-agent/pkg/app"
 	"github.com/docker/docker-agent/pkg/browser"
 	"github.com/docker/docker-agent/pkg/evaluation"
-	"github.com/docker/docker-agent/pkg/modelsdev"
 	"github.com/docker/docker-agent/pkg/session"
 	"github.com/docker/docker-agent/pkg/shellpath"
 	"github.com/docker/docker-agent/pkg/tools"
@@ -258,43 +257,6 @@ func (m *appModel) handleToggleYolo() (tea.Model, tea.Cmd) {
 	return m, cmd
 }
 
-func (m *appModel) handleToggleThinking() (tea.Model, tea.Cmd) {
-	if m.cancelThinkingCheck != nil {
-		m.cancelThinkingCheck()
-	}
-	ctx, cancel := context.WithCancel(context.Background())
-	m.cancelThinkingCheck = cancel
-
-	currentModel := m.application.CurrentAgentModel()
-	return m, func() tea.Msg {
-		supported := modelsdev.ModelSupportsReasoning(ctx, currentModel)
-		return messages.ToggleThinkingResultMsg{Supported: supported}
-	}
-}
-
-func (m *appModel) handleToggleThinkingResult(msg messages.ToggleThinkingResultMsg) (tea.Model, tea.Cmd) {
-	if !msg.Supported {
-		return m, notification.InfoCmd("Thinking/reasoning is not supported for the current model")
-	}
-	sess := m.application.Session()
-	sess.Thinking = !sess.Thinking
-	m.sessionState.SetThinking(sess.Thinking)
-	if store := m.application.SessionStore(); store != nil {
-		if err := store.UpdateSession(context.Background(), sess); err != nil {
-			return m, notification.ErrorCmd(fmt.Sprintf("Failed to save session: %v", err))
-		}
-	}
-	var infoMsg string
-	if sess.Thinking {
-		infoMsg = "Thinking/reasoning enabled for this session"
-	} else {
-		infoMsg = "Thinking/reasoning disabled for this session"
-	}
-	updated, cmd := m.chatPage.Update(messages.SessionToggleChangedMsg{})
-	m.chatPage = updated.(chat.Page)
-	return m, tea.Batch(cmd, notification.InfoCmd(infoMsg))
-}
-
 func (m *appModel) handleToggleHideToolResults() (tea.Model, tea.Cmd) {
 	updated, cmd := m.chatPage.Update(messages.ToggleHideToolResultsMsg{})
 	m.chatPage = updated.(chat.Page)
@@ -346,6 +308,16 @@ func (m *appModel) handleShowPermissionsDialog() (tea.Model, tea.Cmd) {
 	yoloEnabled := sess != nil && sess.ToolsApproved
 	return m, core.CmdHandler(dialog.OpenDialogMsg{
 		Model: dialog.NewPermissionsDialog(perms, yoloEnabled),
+	})
+}
+
+func (m *appModel) handleShowToolsDialog() (tea.Model, tea.Cmd) {
+	agentTools, err := m.application.CurrentAgentTools(context.Background())
+	if err != nil {
+		return m, notification.ErrorCmd(fmt.Sprintf("Failed to load tools: %v", err))
+	}
+	return m, core.CmdHandler(dialog.OpenDialogMsg{
+		Model: dialog.NewToolsDialog(agentTools),
 	})
 }
 

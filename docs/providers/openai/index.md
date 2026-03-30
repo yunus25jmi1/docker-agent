@@ -77,3 +77,33 @@ models:
     model: gpt-4o
     base_url: https://your-proxy.example.com/v1
 ```
+
+## WebSocket Transport
+
+For OpenAI Responses API models (gpt-4.1+, o-series, gpt-5), you can use WebSocket streaming instead of the default SSE (Server-Sent Events):
+
+```yaml
+models:
+  fast-gpt:
+    provider: openai
+    model: gpt-4.1
+    provider_opts:
+      transport: websocket  # Use WebSocket instead of SSE
+```
+
+### Benefits
+
+- **~40% faster** for workflows with 20+ tool calls
+- **Persistent connection** reduces per-turn overhead
+- **Server-side caching** of connection state
+- **Automatic fallback** to SSE if WebSocket fails
+
+### Requirements
+
+- Only works with Responses API models: `gpt-4.1+`, `o1`, `o3`, `o4`, `gpt-5`
+- NOT compatible with `--gateway` flag (automatically falls back to SSE)
+- Requires `OPENAI_API_KEY` environment variable
+
+### Example
+
+See [`examples/websocket_transport.yaml`]({{ '/examples/websocket_transport/' | relative_url }}) for a complete example.

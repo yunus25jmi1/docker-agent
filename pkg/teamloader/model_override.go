@@ -21,6 +21,7 @@ func WithModelOverride(inner tools.ToolSet, model string) tools.ToolSet {
 
 type modelOverrideToolset struct {
 	tools.ToolSet
+
 	model string
 }
 

@@ -1,6 +1,7 @@
 package remote
 
 import (
+	"context"
 	"fmt"
 
 	"github.com/google/go-containerregistry/pkg/crane"
@@ -13,7 +14,7 @@ import (
 )
 
 // Push pushes an artifact from the content store to an OCI registry
-func Push(reference string) error {
+func Push(ctx context.Context, reference string) error {
 	store, err := content.NewStore()
 	if err != nil {
 		return fmt.Errorf("creating content store: %w", err)
@@ -45,7 +46,7 @@ func Push(reference string) error {
 		return fmt.Errorf("parsing registry reference %s: %w", reference, err)
 	}
 
-	if err := crane.Push(img, ref.String()); err != nil {
+	if err := crane.Push(img, ref.String(), crane.WithContext(ctx), crane.WithTransport(NewTransport(ctx))); err != nil {
 		return fmt.Errorf("pushing image to registry %s: %w", reference, err)
 	}
 

@@ -263,3 +263,29 @@ func TestIsOpenAIThinkingOnlyModel(t *testing.T) {
 		})
 	}
 }
+
+// TestApplyProviderDefaults_DoesNotModifyOriginal verifies that applyProviderDefaults
+// does not mutate the input config's ProviderOpts map.
+func TestApplyProviderDefaults_DoesNotModifyOriginal(t *testing.T) {
+	t.Parallel()
+
+	original := &latest.ModelConfig{
+		Provider:       "anthropic",
+		Model:          "claude-sonnet-4-0",
+		ThinkingBudget: &latest.ThinkingBudget{Tokens: 8192},
+		ProviderOpts:   map[string]any{"custom_key": "original_value"},
+	}
+
+	result := applyProviderDefaults(original, nil)
+
+	// Result should have interleaved_thinking set (because thinking_budget is set).
+	require.NotNil(t, result.ProviderOpts)
+	assert.Equal(t, true, result.ProviderOpts["interleaved_thinking"])
+
+	// Original must NOT have interleaved_thinking added.
+	_, exists := original.ProviderOpts["interleaved_thinking"]
+	assert.False(t, exists, "original ProviderOpts must not be mutated by applyProviderDefaults")
+
+	// Original custom key must still be there.
+	assert.Equal(t, "original_value", original.ProviderOpts["custom_key"])
+}

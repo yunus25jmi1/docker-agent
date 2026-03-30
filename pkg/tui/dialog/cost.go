@@ -28,6 +28,7 @@ import (
 
 type costDialog struct {
 	BaseDialog
+
 	session    *session.Session
 	keyMap     costDialogKeyMap
 	scrollview *scrollview.Model
@@ -97,6 +98,7 @@ func (d *costDialog) View() string {
 
 type totalUsage struct {
 	chat.Usage
+
 	label  string
 	model  string // model name (only set for per-message entries)
 	cost   float64

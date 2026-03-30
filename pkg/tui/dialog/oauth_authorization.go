@@ -15,6 +15,7 @@ import (
 
 type oauthAuthorizationDialog struct {
 	BaseDialog
+
 	serverURL string
 	app       *app.App
 	keyMap    ConfirmKeyMap

@@ -39,9 +39,9 @@ func newMCPCmd() *cobra.Command {
 }
 
 func (f *mcpFlags) runMCPCommand(cmd *cobra.Command, args []string) error {
-	telemetry.TrackCommand("serve", append([]string{"mcp"}, args...))
-
 	ctx := cmd.Context()
+	telemetry.TrackCommand(ctx, "serve", append([]string{"mcp"}, args...))
+
 	agentFilename := args[0]
 
 	if !f.http {

@@ -19,13 +19,13 @@ func TestDebug_Title(t *testing.T) {
 		{"OpenAI_gpt52pro", "openai/gpt-5.2-pro", "Assistant Capabilities Overview\n"},
 		{"OpenAI_gpt52codex", "openai/gpt-5.2-codex", "AI Assistant Capabilities\n"},
 
-		// Anthopic
+		// Anthropic
 		{"Anthropic", "anthropic/claude-haiku-4-5", "AI Assistant Capabilities Overview\n"},
 		{"Anthropic_Sonnet45", "anthropic/claude-sonnet-4-5", "What can you do?\n"},
 		{"Anthropic_Opus46", "anthropic/claude-opus-4-6", "AI Assistant Capabilities Overview\n"},
 
 		// Google
-		{"Google_Gemini25FlashLite", "google/gemini-2.5-flash-lite", "AI Capabilities Overview\n"},
+		{"Google_Gemini25FlashLite", "google/gemini-2.5-flash-lite", "AI capabilities overview\n"},
 		{"Google_Gemini3ProPreview", "google/gemini-3-pro-preview", "AI Capabilities Inquiry\n"},
 	}
 

@@ -19,9 +19,33 @@ Complex tasks benefit from specialization. Instead of one monolithic agent tryin
 
 Each agent has its own model, tools, and instructions — optimized for its specific role.
 
-## How Delegation Works
+## Two Patterns: Delegation vs. Handoffs
 
-Agents delegate tasks using the built-in `transfer_task` tool, which is automatically available to any agent with sub-agents. This smart delegation means agents can automatically route tasks to the most suitable specialist.
+docker-agent supports two multi-agent patterns:
+
+| | **Delegation** (`sub_agents`) | **Handoffs** (`handoffs`) |
+|---|---|---|
+| **Topology** | Hierarchical (parent → child → parent) | Peer-to-peer graph (A → B → C → A) |
+| **Session** | Child runs in a **sub-session** | Conversation stays in the **same session** |
+| **Context** | Child gets a clean task description | Next agent sees the **full conversation history** |
+| **Control flow** | Parent blocks until child finishes, then continues | Active agent switches — previous agent is no longer in the loop |
+| **Tool** | `transfer_task` | `handoff` |
+| **Best for** | Task delegation to specialists | Pipeline workflows, conversational routing |
+
+You can combine both patterns in the same configuration — an agent can have both `sub_agents` and `handoffs`.
+
+<div class="callout callout-tip">
+<div class="callout-title">💡 When to use which
+</div>
+  <p><strong><code>sub_agents</code></strong> — Use when a coordinator needs to send tasks to specialists and synthesize their results.</p>
+  <p><strong><code>handoffs</code></strong> — Use when agents should take turns processing the same conversation (pipelines, routing).</p>
+  <p><strong><code>background_agents</code></strong> — Use when multiple independent tasks can run simultaneously.</p>
+
+</div>
+
+## Delegation with `sub_agents`
+
+Agents delegate tasks using the built-in `transfer_task` tool, which is automatically available to any agent with `sub_agents`. The parent agent sends a task to a child agent, waits for the result, and then continues.
 
 1. **User** sends a message to the root agent
 2. **Root agent** analyzes the request and decides which sub-agent should handle it
@@ -45,11 +69,89 @@ transfer_task(
 
 </div>
 
+## Handoffs Routing
+
+Handoffs are a peer-to-peer routing pattern where agents **hand off the entire conversation** to another agent. Unlike delegation, there is no sub-session — the conversation stays in a single session and the active agent simply switches.
+
+This pattern is ideal for:
+
+- **Pipeline workflows** — data flows through a chain of specialized agents
+- **Conversational routing** — a coordinator routes the user to the right specialist, who can route back when done
+- **Graph topologies** — agents can form cycles (A → B → C → A), enabling iterative workflows
+
+### How It Works
+
+1. **User** sends a message to the starting agent
+2. **Agent A** processes the message, then calls `handoff` to route to **Agent B**
+3. **Agent B** becomes the active agent and sees the **full conversation history**
+4. **Agent B** can respond, use its own tools, or hand off to another agent
+5. This continues until an agent responds directly without handing off
+
+```bash
+# The handoff tool call looks like:
+handoff(
+  agent="summarizer"
+)
+```
+
+<div class="callout callout-info">
+<div class="callout-title">ℹ️ Scoped Handoff Targets
+</div>
+  <p>Each agent can only hand off to agents listed in its own <code>handoffs</code> array. The <code>handoff</code> tool is automatically injected — you don't need to add it manually.</p>
+
+</div>
+
+### Example
+
+A coordinator routes to a researcher, who hands off to a summarizer, who returns to the coordinator:
+
+```
+Root ──→ Researcher ──→ Summarizer ──→ Root
+```
+
+```yaml
+agents:
+  root:
+    model: anthropic/claude-sonnet-4-5
+    description: Coordinator that routes queries
+    instruction: |
+      Route research queries to the researcher.
+    handoffs:
+      - researcher
+
+  researcher:
+    model: openai/gpt-4o
+    description: Web researcher
+    instruction: |
+      Search the web, then hand off to the summarizer.
+    toolsets:
+      - type: mcp
+        ref: docker:duckduckgo
+    handoffs:
+      - summarizer
+
+  summarizer:
+    model: openai/gpt-4o-mini
+    description: Summarizes findings
+    instruction: |
+      Summarize the research results, then hand off
+      back to root.
+    handoffs:
+      - root
+```
+
+<div class="callout callout-tip">
+<div class="callout-title">💡 Full pipeline example
+</div>
+  <p>For a more complex handoff graph with branching and multiple processing stages, see <a href="https://github.com/docker/docker-agent/blob/main/examples/handoff.yaml"><code>examples/handoff.yaml</code></a>.</p>
+
+</div>
+
 ## Parallel Delegation with Background Agents
 
 `transfer_task` is **sequential** — the coordinator waits for the sub-agent to finish before continuing. When you need to fan out work to multiple agents at the same time, use the `background_agents` toolset instead.
 
-Add it to your coordinator’s toolsets:
+Add it to your coordinator's toolsets:
 
 ```yaml
 agents:
@@ -81,11 +183,39 @@ list_background_agents()
 view_background_agent(task_id="agent_task_abc123")
 ```
 
+## External Sub-Agents from Registries
+
+Sub-agents don't have to be defined locally — you can reference agents from OCI registries (such as the [Docker Agent Catalog](https://hub.docker.com/u/agentcatalog)) directly in your `sub_agents` list. This lets you compose teams using pre-built, shared agents without duplicating their configuration.
+
+```yaml
+agents:
+  root:
+    model: openai/gpt-4o
+    description: Coordinator that delegates to local and catalog sub-agents
+    instruction: |
+      Delegate tasks to the most appropriate sub-agent.
+    sub_agents:
+      - local_helper
+      - agentcatalog/pirate # pulled from registry automatically
+
+  local_helper:
+    model: openai/gpt-4o
+    description: A local helper agent for simple tasks
+    instruction: You are a helpful assistant.
+```
+
+External sub-agents are automatically named after their last path segment — for example, `agentcatalog/pirate` becomes `pirate`. You can also give them an explicit name using the `name:reference` syntax:
+
+```yaml
+    sub_agents:
+      - my_pirate:agentcatalog/pirate  # available as "my_pirate"
+      - reviewer:docker.io/myorg/review-agent:latest
+```
+
 <div class="callout callout-tip">
-<div class="callout-title">💡 When to use which
+<div class="callout-title">💡 Tip
 </div>
-  <p><strong><code>transfer_task</code></strong> — simple, sequential delegation. Best when the coordinator needs the result before deciding what to do next.</p>
-  <p><strong><code>background_agents</code></strong> — parallel, async delegation. Best when multiple independent tasks can run simultaneously.</p>
+  <p>External sub-agents work with any OCI-compatible registry, not just the Docker Agent Catalog. See <a href="{{ '/concepts/distribution/' | relative_url }}">Agent Distribution</a> for more on registry references.</p>
 
 </div>
 
@@ -211,8 +341,9 @@ toolsets:
 - **Keep agents focused** — Each agent should have a clear, narrow role
 - **Write clear descriptions** — The coordinator uses descriptions to decide who to delegate to
 - **Give minimal tools** — Only give each agent the tools it needs for its specific role
-- **Use the think tool** — Give coordinators the think tool so they reason about delegation
+- **Use the think tool when needed** — For models without native reasoning, give coordinators the think tool so they reason about delegation. Models with built-in thinking (e.g., via `thinking_budget`) don't need it
 - **Use the right model** — Use capable models for complex reasoning, cheap models for simple tasks
+- **Choose the right pattern** — Use `sub_agents` for hierarchical task delegation, `handoffs` for pipeline workflows and conversational routing
 
 <div class="callout callout-info">
 <div class="callout-title">ℹ️ Beyond docker-agent

@@ -1,12 +1,14 @@
 package httpclient
 
 import (
+	"context"
 	"fmt"
 	"maps"
 	"net/http"
 	"net/url"
 	"runtime"
 
+	"github.com/docker/docker-agent/pkg/remote"
 	"github.com/docker/docker-agent/pkg/version"
 )
 
@@ -17,7 +19,7 @@ type HTTPOptions struct {
 
 type Opt func(*HTTPOptions)
 
-func NewHTTPClient(opts ...Opt) *http.Client {
+func NewHTTPClient(ctx context.Context, opts ...Opt) *http.Client {
 	httpOptions := HTTPOptions{
 		Header: make(http.Header),
 	}
@@ -32,7 +34,7 @@ func NewHTTPClient(opts ...Opt) *http.Client {
 	// Disable automatic gzip: Go's default transport transparently compresses
 	// and decompresses responses, which is incompatible with SSE streaming.
 	// See https://github.com/docker/docker-agent/issues/1956
-	rt := newTransport()
+	rt := newTransport(ctx)
 
 	return &http.Client{
 		Transport: &userAgentTransport{
@@ -95,15 +97,18 @@ func WithQuery(query url.Values) Opt {
 	}
 }
 
-// newTransport returns an HTTP transport with automatic gzip compression disabled.
-func newTransport() http.RoundTripper {
-	t, ok := http.DefaultTransport.(*http.Transport)
-	if !ok {
-		return http.DefaultTransport
+// newTransport returns an HTTP transport with automatic gzip compression disabled and using Docker Desktop proxy if available.
+func newTransport(ctx context.Context) http.RoundTripper {
+	// Get the base transport with Desktop proxy support from remote package
+	rt := remote.NewTransport(ctx)
+
+	// If it's an http.Transport, disable compression for SSE streaming compatibility
+	if transport, ok := rt.(*http.Transport); ok {
+		transport.DisableCompression = true
+		return transport
 	}
-	transport := t.Clone()
-	transport.DisableCompression = true
-	return transport
+
+	return rt
 }
 
 type userAgentTransport struct {

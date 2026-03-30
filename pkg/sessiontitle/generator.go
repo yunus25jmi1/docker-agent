@@ -104,8 +104,8 @@ func (g *Generator) Generate(ctx context.Context, sessionID string, userMessages
 			baseModel,
 			options.WithStructuredOutput(nil),
 			options.WithMaxTokens(20),
+			options.WithNoThinking(),
 			options.WithGeneratingTitle(),
-			options.WithThinking(false), // Disable thinking to avoid max_tokens < thinking_budget errors
 		)
 
 		// Call the provider directly (no tools needed for title generation)

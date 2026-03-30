@@ -25,6 +25,7 @@ type CommandExecuteMsg struct {
 // commandPaletteDialog implements Dialog for the command palette
 type commandPaletteDialog struct {
 	BaseDialog
+
 	textInput      textinput.Model
 	categories     []commands.Category
 	filtered       []commands.Item

@@ -67,7 +67,7 @@ func (t *Transcriber) Start(ctx context.Context, handler TranscriptHandler) erro
 	t.cancel = cancel
 
 	// Connect to OpenAI Realtime API
-	conn, _, err := websocket.DefaultDialer.DialContext(ctx, openAIRealtimeURL, http.Header{
+	conn, _, err := websocket.DefaultDialer.DialContext(ctx, openAIRealtimeURL, http.Header{ //nolint:bodyclose // websocket upgrade response
 		"Authorization": []string{"Bearer " + t.apiKey},
 		"OpenAI-Beta":   []string{"realtime=v1"},
 	})

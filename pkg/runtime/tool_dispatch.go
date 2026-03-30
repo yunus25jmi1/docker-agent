@@ -261,6 +261,13 @@ func (r *LocalRuntime) executeToolWithHandler(
 
 	telemetry.RecordToolCall(ctx, toolCall.Function.Name, sess.ID, a.Name(), duration, err)
 
+	// Record audit trail for tool call
+	if r.audit != nil {
+		if _, auditErr := r.audit.RecordToolCall(ctx, sess, a.Name(), toolCall, res, duration); auditErr != nil {
+			slog.Warn("Failed to record audit trail for tool call", "tool", toolCall.Function.Name, "error", auditErr)
+		}
+	}
+
 	if err != nil {
 		if errors.Is(err, context.Canceled) || errors.Is(ctx.Err(), context.Canceled) {
 			slog.Debug("Tool handler canceled by context", "tool", toolCall.Function.Name, "agent", a.Name(), "session_id", sess.ID)
@@ -277,7 +284,7 @@ func (r *LocalRuntime) executeToolWithHandler(
 		slog.Debug("Tool call completed", "tool", toolCall.Function.Name, "output_length", len(res.Output))
 	}
 
-	events <- ToolCallResponse(toolCall, tool, res, res.Output, a.Name())
+	events <- ToolCallResponse(toolCall.ID, tool, res, res.Output, a.Name())
 
 	// Ensure tool response content is not empty for API compatibility
 	content := res.Output
@@ -432,7 +439,7 @@ func addAgentMessage(sess *session.Session, a *agent.Agent, msg *chat.Message, e
 // addToolErrorResponse adds a tool error response to the session and emits the event.
 // This consolidates the common pattern used by validation, rejection, and cancellation responses.
 func (r *LocalRuntime) addToolErrorResponse(_ context.Context, sess *session.Session, toolCall tools.ToolCall, tool tools.Tool, events chan Event, a *agent.Agent, errorMsg string) {
-	events <- ToolCallResponse(toolCall, tool, tools.ResultError(errorMsg), errorMsg, a.Name())
+	events <- ToolCallResponse(toolCall.ID, tool, tools.ResultError(errorMsg), errorMsg, a.Name())
 
 	toolResponseMsg := chat.Message{
 		Role:       chat.MessageRoleTool,

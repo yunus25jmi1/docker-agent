@@ -46,6 +46,7 @@ tasks:
     desc: Run golangci-lint
     cmds:
       - golangci-lint run
+      - go run ./lint .
       - go mod tidy --diff >/dev/null || (echo "go.mod/go.sum files are not tidy" && exit 1)
     sources:
       - "{{.GO_SOURCES}}"

@@ -21,6 +21,7 @@ const defaultJudgeModel = "anthropic/claude-opus-4-5-20251101"
 
 type evalFlags struct {
 	evaluation.Config
+
 	runConfig config.RuntimeConfig
 	outputDir string
 }
@@ -49,7 +50,7 @@ func newEvalCmd() *cobra.Command {
 }
 
 func (f *evalFlags) runEvalCommand(cmd *cobra.Command, args []string) error {
-	telemetry.TrackCommand("eval", args)
+	telemetry.TrackCommand(cmd.Context(), "eval", args)
 
 	ctx := cmd.Context()
 	agentFilename := args[0]

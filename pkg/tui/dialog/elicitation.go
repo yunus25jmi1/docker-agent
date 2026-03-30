@@ -43,6 +43,7 @@ type ElicitationField struct {
 // is shown so the user can type an answer.
 type ElicitationDialog struct {
 	BaseDialog
+
 	title         string
 	message       string
 	fields        []ElicitationField

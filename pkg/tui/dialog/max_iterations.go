@@ -23,6 +23,7 @@ const (
 
 type maxIterationsDialog struct {
 	BaseDialog
+
 	maxIterations int
 	app           *app.App
 	keyMap        ConfirmKeyMap

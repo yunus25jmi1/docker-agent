@@ -9,6 +9,7 @@ import (
 	v4 "github.com/docker/docker-agent/pkg/config/v4"
 	v5 "github.com/docker/docker-agent/pkg/config/v5"
 	v6 "github.com/docker/docker-agent/pkg/config/v6"
+	v7 "github.com/docker/docker-agent/pkg/config/v7"
 )
 
 func versions() (map[string]func([]byte) (any, error), []func(any, []byte) (any, error)) {
@@ -22,6 +23,7 @@ func versions() (map[string]func([]byte) (any, error), []func(any, []byte) (any,
 	v4.Register(parsers, &upgraders)
 	v5.Register(parsers, &upgraders)
 	v6.Register(parsers, &upgraders)
+	v7.Register(parsers, &upgraders)
 	latest.Register(parsers, &upgraders)
 
 	return parsers, upgraders

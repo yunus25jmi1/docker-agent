@@ -29,6 +29,7 @@ const (
 
 type attachmentPreviewDialog struct {
 	BaseDialog
+
 	preview  editor.AttachmentPreview
 	viewport viewport.Model
 

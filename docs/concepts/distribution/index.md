@@ -66,6 +66,25 @@ $ docker agent run agentcatalog/pirate
 $ docker agent run agentcatalog/coder
 ```
 
+## Using as Sub-Agents
+
+Registry agents can be used directly as sub-agents in a multi-agent configuration — no need to define them locally:
+
+```yaml
+agents:
+  root:
+    model: openai/gpt-4o
+    description: Coordinator
+    instruction: Delegate tasks to the right sub-agent.
+    sub_agents:
+      - agentcatalog/pirate         # auto-named "pirate"
+      - my_reviewer:myorg/reviewer  # explicitly named "my_reviewer"
+```
+
+External sub-agents are automatically named after their last path segment. Use the `name:reference` syntax to give them a custom name.
+
+See [External Sub-Agents]({{ '/concepts/multi-agent/#external-sub-agents-from-registries' | relative_url }}) for details.
+
 ## Using with Aliases
 
 Combine OCI references with aliases for convenient access:

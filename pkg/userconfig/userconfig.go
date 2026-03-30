@@ -61,6 +61,10 @@ type Settings struct {
 	// SoundThreshold is the minimum duration in seconds a task must run
 	// before a success sound is played. Defaults to 5 seconds.
 	SoundThreshold int `yaml:"sound_threshold,omitempty"`
+	// Permissions defines global permission patterns applied across all sessions
+	// and agents. These act as user-wide defaults; session-level and agent-level
+	// permissions override them.
+	Permissions *latest.PermissionsConfig `yaml:"permissions,omitempty"`
 }
 
 // DefaultTabTitleMaxLength is the default maximum tab title length when not configured.

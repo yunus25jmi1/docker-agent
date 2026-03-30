@@ -22,7 +22,6 @@ import (
 	"github.com/docker/docker-agent/pkg/model/provider/options"
 	"github.com/docker/docker-agent/pkg/modelsdev"
 	"github.com/docker/docker-agent/pkg/permissions"
-	"github.com/docker/docker-agent/pkg/rag"
 	"github.com/docker/docker-agent/pkg/skills"
 	"github.com/docker/docker-agent/pkg/team"
 	"github.com/docker/docker-agent/pkg/tools"
@@ -122,20 +121,9 @@ func LoadWithConfig(ctx context.Context, agentSource config.Source, runConfig *c
 		return nil, err
 	}
 
-	// Create RAG managers
+	// Load agents
 	parentDir := cmp.Or(agentSource.ParentDir(), runConfig.WorkingDir)
 	configName := configNameFromSource(agentSource.Name())
-	ragManagers, err := rag.NewManagers(ctx, cfg, rag.ManagersBuildConfig{
-		ParentDir:     parentDir,
-		ModelsGateway: runConfig.ModelsGateway,
-		Env:           env,
-		Models:        cfg.Models,
-	})
-	if err != nil {
-		return nil, fmt.Errorf("failed to create RAG managers: %w", err)
-	}
-
-	// Load agents
 	var agents []*agent.Agent
 	agentsByName := make(map[string]*agent.Agent)
 
@@ -171,12 +159,13 @@ func LoadWithConfig(ctx context.Context, agentSource config.Source, runConfig *c
 			agent.WithAddPromptFiles(promptFiles),
 			agent.WithMaxIterations(agentConfig.MaxIterations),
 			agent.WithMaxConsecutiveToolCalls(agentConfig.MaxConsecutiveToolCalls),
+			agent.WithMaxOldToolCallTokens(agentConfig.MaxOldToolCallTokens),
 			agent.WithNumHistoryItems(agentConfig.NumHistoryItems),
 			agent.WithCommands(expander.ExpandCommands(ctx, agentConfig.Commands)),
 			agent.WithHooks(config.MergeHooks(agentConfig.Hooks, cliHooks)),
 		}
 
-		models, thinkingConfigured, err := getModelsForAgent(ctx, cfg, &agentConfig, autoModel, runConfig)
+		models, err := getModelsForAgent(ctx, cfg, &agentConfig, autoModel, runConfig)
 		if err != nil {
 			// Return auto model fallback errors and DMR not installed errors directly
 			// without wrapping to provide cleaner messages
@@ -188,7 +177,6 @@ func LoadWithConfig(ctx context.Context, agentSource config.Source, runConfig *c
 		for _, model := range models {
 			opts = append(opts, agent.WithModel(model))
 		}
-		opts = append(opts, agent.WithThinkingConfigured(thinkingConfigured))
 
 		// Load fallback models if configured
 		fallbackModelRefs := agentConfig.GetFallbackModels()
@@ -209,12 +197,6 @@ func LoadWithConfig(ctx context.Context, agentSource config.Source, runConfig *c
 		agentTools, warnings := getToolsForAgent(ctx, &agentConfig, parentDir, runConfig, loadOpts.toolsetRegistry, configName)
 		if len(warnings) > 0 {
 			opts = append(opts, agent.WithLoadTimeWarnings(warnings))
-		}
-
-		// Add RAG tools if agent has RAG sources
-		if len(agentConfig.RAG) > 0 {
-			ragTools := createRAGToolsForAgent(&agentConfig, ragManagers)
-			agentTools = append(agentTools, ragTools...)
 		}
 
 		// Add skills toolset if skills are enabled
@@ -275,7 +257,6 @@ func LoadWithConfig(ctx context.Context, agentSource config.Source, runConfig *c
 	return &LoadResult{
 		Team: team.New(
 			team.WithAgents(agents...),
-			team.WithRAGManagers(ragManagers),
 			team.WithPermissions(permChecker),
 		),
 		Models:             cfg.Models,
@@ -284,9 +265,8 @@ func LoadWithConfig(ctx context.Context, agentSource config.Source, runConfig *c
 	}, nil
 }
 
-func getModelsForAgent(ctx context.Context, cfg *latest.Config, a *latest.AgentConfig, autoModelFn func() latest.ModelConfig, runConfig *config.RuntimeConfig) ([]provider.Provider, bool, error) {
+func getModelsForAgent(ctx context.Context, cfg *latest.Config, a *latest.AgentConfig, autoModelFn func() latest.ModelConfig, runConfig *config.RuntimeConfig) ([]provider.Provider, error) {
 	var models []provider.Provider
-	thinkingConfigured := false
 
 	// Obtain the singleton store once, outside the loop.
 	modelsStore, modelsStoreErr := modelsdev.NewStore()
@@ -299,17 +279,10 @@ func getModelsForAgent(ctx context.Context, cfg *latest.Config, a *latest.AgentC
 				modelCfg = autoModelFn()
 				isAutoModel = true
 			} else {
-				return nil, false, fmt.Errorf("model '%s' not found in configuration", name)
+				return nil, fmt.Errorf("model '%s' not found in configuration", name)
 			}
 		}
 		modelCfg.Name = name
-
-		// Check if thinking_budget was explicitly configured BEFORE provider defaults are applied.
-		// This is used to initialize session thinking state - thinking is only enabled by default
-		// when the user explicitly configured it in their YAML.
-		if modelCfg.ThinkingBudget != nil && !modelCfg.ThinkingBudget.IsDisabled() {
-			thinkingConfigured = true
-		}
 
 		// Use max_tokens from config if specified, otherwise look up from models.dev
 		maxTokens := &defaultMaxTokens
@@ -341,14 +314,14 @@ func getModelsForAgent(ctx context.Context, cfg *latest.Config, a *latest.AgentC
 		if err != nil {
 			// Return a cleaner error message for auto model selection failures
 			if isAutoModel {
-				return nil, false, &config.AutoModelFallbackError{}
+				return nil, &config.AutoModelFallbackError{}
 			}
-			return nil, false, err
+			return nil, err
 		}
 		models = append(models, model)
 	}
 
-	return models, thinkingConfigured, nil
+	return models, nil
 }
 
 // getFallbackModelsForAgent returns fallback providers for an agent based on its fallback configuration.
@@ -609,38 +582,4 @@ func externalDepthFromContext(ctx context.Context) int {
 
 func contextWithExternalDepth(ctx context.Context, depth int) context.Context {
 	return context.WithValue(ctx, externalDepthKey, depth)
-}
-
-// createRAGToolsForAgent creates RAG tools for an agent, one for each referenced RAG source
-func createRAGToolsForAgent(agentConfig *latest.AgentConfig, allManagers map[string]*rag.Manager) []tools.ToolSet {
-	if len(agentConfig.RAG) == 0 {
-		return nil
-	}
-
-	var ragTools []tools.ToolSet
-
-	for _, ragName := range agentConfig.RAG {
-		mgr, exists := allManagers[ragName]
-		if !exists {
-			slog.Error("RAG source not found", "rag_source", ragName)
-			continue
-		}
-
-		// Use custom tool name if configured, otherwise use the RAG source name
-		toolName := cmp.Or(mgr.ToolName(), ragName)
-
-		// Create a separate tool for this RAG source
-		ragTool := builtin.NewRAGTool(mgr, toolName)
-
-		ragTools = append(ragTools, ragTool)
-
-		slog.Debug("Created RAG tool for agent",
-			"rag_source", ragName,
-			"tool_name", toolName,
-			"manager_name", mgr.Name(),
-			"description", mgr.Description(),
-			"instruction", mgr.ToolInstruction())
-	}
-
-	return ragTools
 }

@@ -19,6 +19,7 @@ import (
 // MockHTTPClient captures HTTP requests for testing
 type MockHTTPClient struct {
 	*http.Client
+
 	mu       sync.Mutex
 	requests []*http.Request
 	bodies   [][]byte
@@ -91,7 +92,7 @@ func TestNewClient(t *testing.T) {
 	logger := slog.New(slog.NewTextHandler(os.Stderr, nil))
 
 	// Note: debug mode does NOT disable HTTP calls - it only adds extra logging
-	client := newClient(logger, false, false, "test-version")
+	client := newClient(t.Context(), logger, false, false, "test-version")
 
 	// This should not panic
 	commandEvent := &CommandEvent{
@@ -107,7 +108,7 @@ func TestNewClient(t *testing.T) {
 func TestSessionTracking(t *testing.T) {
 	logger := slog.New(slog.NewTextHandler(os.Stderr, nil))
 	mockHTTP := NewMockHTTPClient()
-	client := newClient(logger, true, true, "test-version", mockHTTP.Client)
+	client := newClient(t.Context(), logger, true, true, "test-version", mockHTTP.Client)
 
 	client.endpoint = "https://test-session-tracking.com/api"
 	client.apiKey = "test-session-key"
@@ -145,7 +146,7 @@ func TestSessionTracking(t *testing.T) {
 func TestCommandTracking(t *testing.T) {
 	logger := slog.New(slog.NewTextHandler(os.Stderr, nil))
 	mockHTTP := NewMockHTTPClient()
-	client := newClient(logger, true, true, "test-version", mockHTTP.Client)
+	client := newClient(t.Context(), logger, true, true, "test-version", mockHTTP.Client)
 
 	client.endpoint = "https://test-command-tracking.com/api"
 	client.apiKey = "test-command-key"
@@ -180,7 +181,7 @@ func TestCommandTracking(t *testing.T) {
 func TestCommandTrackingWithError(t *testing.T) {
 	logger := slog.New(slog.NewTextHandler(os.Stderr, nil))
 	mockHTTP := NewMockHTTPClient()
-	client := newClient(logger, true, true, "test-version", mockHTTP.Client)
+	client := newClient(t.Context(), logger, true, true, "test-version", mockHTTP.Client)
 
 	client.endpoint = "https://test-command-error.com/api"
 	client.apiKey = "test-command-error-key"
@@ -209,7 +210,7 @@ func TestCommandTrackingWithError(t *testing.T) {
 func TestStructuredEvent(t *testing.T) {
 	logger := slog.New(slog.NewTextHandler(os.Stderr, nil))
 	// Use debug mode to avoid HTTP calls in tests
-	client := newClient(logger, true, true, "test-version")
+	client := newClient(t.Context(), logger, true, true, "test-version")
 
 	event := CommandEvent{
 		Action:  "test-command",
@@ -312,7 +313,7 @@ func TestAllEventTypes(t *testing.T) {
 	logger := slog.New(slog.NewTextHandler(os.Stderr, nil))
 	// Use mock HTTP client to avoid actual HTTP calls in tests
 	mockHTTP := NewMockHTTPClient()
-	client := newClient(logger, true, true, "test-version", mockHTTP.Client)
+	client := newClient(t.Context(), logger, true, true, "test-version", mockHTTP.Client)
 
 	client.endpoint = "https://test-telemetry-all-events.com/api"
 	client.apiKey = "test-all-events-key"
@@ -530,7 +531,7 @@ func TestAllEventTypes(t *testing.T) {
 // TestTrackServerStart tests long-running server command tracking
 func TestTrackServerStart(t *testing.T) {
 	logger := slog.New(slog.NewTextHandler(os.Stderr, nil))
-	client := newClient(logger, true, true, "test-version")
+	client := newClient(t.Context(), logger, true, true, "test-version")
 
 	executed := false
 	cmdInfo := CommandInfo{
@@ -565,12 +566,12 @@ func TestGlobalTelemetryFunctions(t *testing.T) {
 	SetGlobalTelemetryVersion("test-version")
 	SetGlobalTelemetryDebugMode(true)
 
-	TrackCommand("test-command", []string{"arg1"})
+	TrackCommand(t.Context(), "test-command", []string{"arg1"})
 
 	assert.NotNil(t, globalToolTelemetryClient)
 
-	EnsureGlobalTelemetryInitialized()
-	client := GetGlobalTelemetryClient()
+	EnsureGlobalTelemetryInitialized(t.Context())
+	client := GetGlobalTelemetryClient(t.Context())
 	assert.NotNil(t, client)
 }
 
@@ -579,7 +580,7 @@ func TestHTTPRequestVerification(t *testing.T) {
 	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelDebug}))
 	mockHTTP := NewMockHTTPClient()
 
-	client := newClient(logger, true, true, "test-version", mockHTTP.Client)
+	client := newClient(t.Context(), logger, true, true, "test-version", mockHTTP.Client)
 
 	client.endpoint = "https://test-telemetry.example.com/api/events"
 	client.apiKey = "test-api-key"
@@ -643,7 +644,7 @@ func TestHTTPRequestVerification(t *testing.T) {
 
 	t.Run("NoHTTPWhenMissingCredentials", func(t *testing.T) {
 		mockHTTP2 := NewMockHTTPClient()
-		client2 := newClient(logger, true, true, "test-version", mockHTTP2.Client)
+		client2 := newClient(t.Context(), logger, true, true, "test-version", mockHTTP2.Client)
 
 		// Leave endpoint and API key empty
 		client2.endpoint = ""
@@ -661,7 +662,7 @@ func TestHTTPRequestVerification(t *testing.T) {
 
 	t.Run("NoHTTPWhenDisabled", func(t *testing.T) {
 		mockHTTP3 := NewMockHTTPClient()
-		client3 := newClient(logger, false, true, "test-version", mockHTTP3.Client)
+		client3 := newClient(t.Context(), logger, false, true, "test-version", mockHTTP3.Client)
 
 		event := &CommandEvent{
 			Action:  "version",
@@ -677,7 +678,7 @@ func TestHTTPRequestVerification(t *testing.T) {
 // TestCreateEventTelemetryTags tests the TELEMETRY_TAGS environment variable support in createEvent
 func TestCreateEventTelemetryTags(t *testing.T) {
 	logger := slog.New(slog.NewTextHandler(os.Stderr, nil))
-	client := newClient(logger, true, true, "test-version")
+	client := newClient(t.Context(), logger, true, true, "test-version")
 	client.userUUID = "test-uuid"
 
 	t.Run("NoTagsSet", func(t *testing.T) {
@@ -780,7 +781,7 @@ func TestCreateEventTelemetryTags(t *testing.T) {
 func TestTelemetryTags(t *testing.T) {
 	logger := slog.New(slog.NewTextHandler(os.Stderr, nil))
 	mockHTTP := NewMockHTTPClient()
-	client := newClient(logger, true, true, "test-version", mockHTTP.Client)
+	client := newClient(t.Context(), logger, true, true, "test-version", mockHTTP.Client)
 
 	client.endpoint = "https://test-tags.com/api"
 	client.apiKey = "test-tags-key"
@@ -905,7 +906,7 @@ func TestTelemetryTags(t *testing.T) {
 func TestNon2xxHTTPResponseHandling(t *testing.T) {
 	logger := slog.New(slog.NewTextHandler(os.Stderr, nil))
 	mockHTTP := NewMockHTTPClient()
-	client := newClient(logger, true, true, "test-version", mockHTTP.Client)
+	client := newClient(t.Context(), logger, true, true, "test-version", mockHTTP.Client)
 
 	client.endpoint = "https://test-error-response.com/api"
 	client.apiKey = "error-key"

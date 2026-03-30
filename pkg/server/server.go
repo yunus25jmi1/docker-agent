@@ -50,8 +50,6 @@ func New(ctx context.Context, sessionStore session.Store, runConfig *config.Runt
 	group.POST("/sessions/:id/resume", s.resumeSession)
 	// Toggle YOLO mode for a session
 	group.POST("/sessions/:id/tools/toggle", s.toggleSessionYolo)
-	// Toggle thinking mode for a session
-	group.POST("/sessions/:id/thinking/toggle", s.toggleSessionThinking)
 	// Update session permissions
 	group.PATCH("/sessions/:id/permissions", s.updateSessionPermissions)
 	// Update session title
@@ -196,7 +194,6 @@ func (s *Server) getSession(c echo.Context) error {
 		CreatedAt:     sess.CreatedAt,
 		Messages:      sess.GetAllMessages(),
 		ToolsApproved: sess.ToolsApproved,
-		Thinking:      sess.Thinking,
 		InputTokens:   sess.InputTokens,
 		OutputTokens:  sess.OutputTokens,
 		WorkingDir:    sess.WorkingDir,
@@ -231,13 +228,6 @@ func (s *Server) getAgentToolCount(c echo.Context) error {
 	}
 
 	return c.JSON(http.StatusOK, map[string]int{"available_tools": count})
-}
-
-func (s *Server) toggleSessionThinking(c echo.Context) error {
-	if err := s.sm.ToggleThinking(c.Request().Context(), c.Param("id")); err != nil {
-		return echo.NewHTTPError(http.StatusInternalServerError, fmt.Sprintf("failed to toggle session thinking mode: %v", err))
-	}
-	return c.JSON(http.StatusOK, nil)
 }
 
 func (s *Server) updateSessionPermissions(c echo.Context) error {

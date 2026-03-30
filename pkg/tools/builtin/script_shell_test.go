@@ -2,12 +2,14 @@ package builtin
 
 import (
 	"encoding/json"
+	"os"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
 	"github.com/docker/docker-agent/pkg/config/latest"
+	"github.com/docker/docker-agent/pkg/tools"
 )
 
 func TestNewScriptShellTool_Empty(t *testing.T) {
@@ -114,6 +116,43 @@ func TestNewScriptShellTool_MissingRequired(t *testing.T) {
 	tool, err := NewScriptShellTool(shellTools, nil)
 	require.Nil(t, tool)
 	require.ErrorContains(t, err, "tool 'docker_images' has required arg 'img' which is not defined in args")
+}
+
+func TestNewScriptShellTool_NumberArg(t *testing.T) {
+	shellTools := map[string]latest.ScriptShellToolConfig{
+		"repeat": {
+			Description: "Repeat a message N times",
+			Cmd:         "for i in $(seq 1 $count); do echo $message; done",
+			Args: map[string]any{
+				"message": map[string]any{
+					"description": "Message to repeat",
+					"type":        "string",
+				},
+				"count": map[string]any{
+					"description": "Number of repetitions",
+					"type":        "number",
+				},
+			},
+			Required: []string{"message", "count"},
+		},
+	}
+
+	tool, err := NewScriptShellTool(shellTools, os.Environ())
+	require.NoError(t, err)
+
+	allTools, err := tool.Tools(t.Context())
+	require.NoError(t, err)
+	require.Len(t, allTools, 1)
+
+	// Simulate LLM sending a number argument (JSON numbers are float64)
+	result, err := allTools[0].Handler(t.Context(), tools.ToolCall{
+		Function: tools.FunctionCall{
+			Arguments: `{"message": "hello", "count": 3}`,
+		},
+	})
+	require.NoError(t, err)
+	assert.False(t, result.IsError, "unexpected error: %s", result.Output)
+	assert.Equal(t, "hello\nhello\nhello\n", result.Output)
 }
 
 func TestNewScriptShellTool_ArgWithoutType(t *testing.T) {

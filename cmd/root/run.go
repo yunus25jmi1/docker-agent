@@ -8,8 +8,6 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
-	goruntime "runtime"
-	"runtime/pprof"
 	"sync"
 	"time"
 
@@ -17,10 +15,13 @@ import (
 	"github.com/spf13/cobra"
 	"go.opentelemetry.io/otel"
 
+	"github.com/docker/docker-agent/pkg/agent"
 	"github.com/docker/docker-agent/pkg/app"
 	"github.com/docker/docker-agent/pkg/cli"
 	"github.com/docker/docker-agent/pkg/config"
 	"github.com/docker/docker-agent/pkg/paths"
+	"github.com/docker/docker-agent/pkg/permissions"
+	"github.com/docker/docker-agent/pkg/profiling"
 	"github.com/docker/docker-agent/pkg/runtime"
 	"github.com/docker/docker-agent/pkg/session"
 	"github.com/docker/docker-agent/pkg/sessiontitle"
@@ -59,6 +60,10 @@ type runExecFlags struct {
 
 	// Run only
 	hideToolResults bool
+
+	// globalPermissions holds the user-level global permission checker built
+	// from user config settings. Nil when no global permissions are configured.
+	globalPermissions *permissions.Checker
 }
 
 func newRunCmd() *cobra.Command {
@@ -128,13 +133,14 @@ func (f *runExecFlags) runRunCommand(cmd *cobra.Command, args []string) error {
 		return runInSandbox(cmd, &f.runConfig, f.sandboxTemplate)
 	}
 
+	ctx := cmd.Context()
+
 	if f.exec {
-		telemetry.TrackCommand("exec", args)
+		telemetry.TrackCommand(ctx, "exec", args)
 	} else {
-		telemetry.TrackCommand("run", args)
+		telemetry.TrackCommand(ctx, "run", args)
 	}
 
-	ctx := cmd.Context()
 	out := cli.NewPrinter(cmd.OutOrStdout())
 
 	useTUI := !f.exec && (f.forceTUI || isatty.IsTerminal(os.Stdout.Fd()))
@@ -144,37 +150,16 @@ func (f *runExecFlags) runRunCommand(cmd *cobra.Command, args []string) error {
 func (f *runExecFlags) runOrExec(ctx context.Context, out *cli.Printer, args []string, useTUI bool) error {
 	slog.Debug("Starting agent", "agent", f.agentName)
 
-	// Start CPU profiling if requested
-	if f.cpuProfile != "" {
-		pf, err := os.Create(f.cpuProfile)
-		if err != nil {
-			return fmt.Errorf("failed to create CPU profile: %w", err)
-		}
-		if err := pprof.StartCPUProfile(pf); err != nil {
-			pf.Close()
-			return fmt.Errorf("failed to start CPU profile: %w", err)
-		}
-		defer pprof.StopCPUProfile()
-		defer pf.Close()
-		slog.Info("CPU profiling enabled", "file", f.cpuProfile)
+	// Start profiling if requested
+	stopProfiling, err := profiling.Start(f.cpuProfile, f.memProfile)
+	if err != nil {
+		return err
 	}
-
-	// Write memory profile at exit if requested
-	if f.memProfile != "" {
-		defer func() {
-			mf, err := os.Create(f.memProfile)
-			if err != nil {
-				slog.Error("Failed to create memory profile", "error", err)
-				return
-			}
-			defer mf.Close()
-			goruntime.GC() // Get up-to-date statistics
-			if err := pprof.WriteHeapProfile(mf); err != nil {
-				slog.Error("Failed to write memory profile", "error", err)
-			}
-			slog.Info("Memory profile written", "file", f.memProfile)
-		}()
-	}
+	defer func() {
+		if err := stopProfiling(); err != nil {
+			slog.Error("Profiling cleanup failed", "error", err)
+		}
+	}()
 
 	var agentFileName string
 	if len(args) > 0 {
@@ -206,6 +191,11 @@ func (f *runExecFlags) runOrExec(ctx context.Context, out *cli.Printer, args []s
 		if alias.HideToolResults && !f.hideToolResults {
 			f.hideToolResults = true
 		}
+	}
+
+	// Build global permissions checker from user config settings.
+	if userSettings.Permissions != nil {
+		f.globalPermissions = permissions.NewChecker(userSettings.Permissions)
 	}
 
 	// Start fake proxy if --fake is specified
@@ -253,7 +243,7 @@ func (f *runExecFlags) runOrExec(ctx context.Context, out *cli.Printer, args []s
 		return err
 	}
 
-	rt, sess, err := f.createLocalRuntimeAndSession(ctx, loadResult)
+	rt, sess, err := f.createLocalRuntimeAndSession(ctx, loadResult, agentFileName)
 	if err != nil {
 		return err
 	}
@@ -270,10 +260,6 @@ func (f *runExecFlags) runOrExec(ctx context.Context, out *cli.Printer, args []s
 	}
 	defer initialTeamCleanup()
 
-	if useTUI {
-		applyTheme()
-	}
-
 	if f.dryRun {
 		out.Println("Dry run mode enabled. Agent initialized but will not execute.")
 		return nil
@@ -283,19 +269,13 @@ func (f *runExecFlags) runOrExec(ctx context.Context, out *cli.Printer, args []s
 		return f.handleExecMode(ctx, out, rt, sess, args)
 	}
 
+	applyTheme()
 	opts, err := f.buildAppOpts(args)
 	if err != nil {
 		return err
 	}
 
-	var sessStore session.Store
-	switch typedRt := rt.(type) {
-	case *runtime.LocalRuntime:
-		sessStore = typedRt.SessionStore()
-	case *runtime.PersistentRuntime:
-		sessStore = typedRt.SessionStore()
-	}
-
+	sessStore := rt.SessionStore()
 	return runTUI(ctx, rt, sess, f.createSessionSpawner(agentSource, sessStore), initialTeamCleanup, opts...)
 }
 
@@ -336,10 +316,16 @@ func (f *runExecFlags) createRemoteRuntimeAndSession(ctx context.Context, origin
 	return remoteRt, sess, nil
 }
 
-func (f *runExecFlags) createLocalRuntimeAndSession(ctx context.Context, loadResult *teamloader.LoadResult) (runtime.Runtime, *session.Session, error) {
+func (f *runExecFlags) createLocalRuntimeAndSession(ctx context.Context, loadResult *teamloader.LoadResult, agentFileName string) (runtime.Runtime, *session.Session, error) {
 	t := loadResult.Team
 
-	agent, err := t.Agent(f.agentName)
+	// Merge user-level global permissions into the team's checker so the
+	// runtime receives a single, already-merged permission set.
+	if f.globalPermissions != nil && !f.globalPermissions.IsEmpty() {
+		t.SetPermissions(permissions.Merge(t.Permissions(), f.globalPermissions))
+	}
+
+	agt, err := t.Agent(f.agentName)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -364,11 +350,22 @@ func (f *runExecFlags) createLocalRuntimeAndSession(ctx context.Context, loadRes
 		AgentDefaultModels: loadResult.AgentDefaultModels,
 	}
 
+	// Load the agent config to get audit configuration
+	agentSource, err := config.Resolve(agentFileName, f.runConfig.EnvProvider())
+	if err != nil {
+		return nil, nil, fmt.Errorf("resolving agent config: %w", err)
+	}
+	agentCfg, err := config.Load(ctx, agentSource)
+	if err != nil {
+		return nil, nil, fmt.Errorf("loading agent config: %w", err)
+	}
+
 	localRt, err := runtime.New(t,
 		runtime.WithSessionStore(sessStore),
 		runtime.WithCurrentAgent(f.agentName),
 		runtime.WithTracer(otel.Tracer(AppName)),
 		runtime.WithModelSwitcherConfig(modelSwitcherCfg),
+		runtime.WithAudit(agentCfg.Audit),
 	)
 	if err != nil {
 		return nil, nil, fmt.Errorf("creating runtime: %w", err)
@@ -404,10 +401,10 @@ func (f *runExecFlags) createLocalRuntimeAndSession(ctx context.Context, loadRes
 		slog.Debug("Loaded existing session", "session_id", resolvedID, "session_ref", f.sessionID, "agent", f.agentName)
 	} else {
 		wd, _ := os.Getwd()
-		sess = session.New(f.buildSessionOpts(agent.MaxIterations(), agent.ThinkingConfigured(), wd)...)
+		sess = session.New(f.buildSessionOpts(agt, wd)...)
 		// Session is stored lazily on first UpdateSession call (when content is added)
 		// This avoids creating empty sessions in the database
-		slog.Debug("Using local runtime", "agent", f.agentName, "thinking", agent.ThinkingConfigured())
+		slog.Debug("Using local runtime", "agent", f.agentName)
 	}
 
 	return localRt, sess, nil
@@ -415,7 +412,10 @@ func (f *runExecFlags) createLocalRuntimeAndSession(ctx context.Context, loadRes
 
 func (f *runExecFlags) handleExecMode(ctx context.Context, out *cli.Printer, rt runtime.Runtime, sess *session.Session, args []string) error {
 	// args[0] is the agent file; args[1:] are user messages for multi-turn conversation
-	userMessages := args[1:]
+	var userMessages []string
+	if len(args) > 1 {
+		userMessages = args[1:]
+	}
 
 	err := cli.Run(ctx, out, cli.Config{
 		AppName:        AppName,
@@ -494,12 +494,13 @@ func (f *runExecFlags) buildAppOpts(args []string) ([]app.Opt, error) {
 // buildSessionOpts returns the canonical set of session options derived from
 // CLI flags and agent configuration. Both the initial session and spawned
 // sessions use this method so their options never drift apart.
-func (f *runExecFlags) buildSessionOpts(maxIterations int, thinking bool, workingDir string) []session.Opt {
+func (f *runExecFlags) buildSessionOpts(agt *agent.Agent, workingDir string) []session.Opt {
 	return []session.Opt{
-		session.WithMaxIterations(maxIterations),
+		session.WithMaxIterations(agt.MaxIterations()),
+		session.WithMaxConsecutiveToolCalls(agt.MaxConsecutiveToolCalls()),
+		session.WithMaxOldToolCallTokens(agt.MaxOldToolCallTokens()),
 		session.WithToolsApproved(f.autoApprove),
 		session.WithHideToolResults(f.hideToolResults),
-		session.WithThinking(thinking),
 		session.WithWorkingDir(workingDir),
 	}
 }
@@ -518,7 +519,7 @@ func (f *runExecFlags) createSessionSpawner(agentSource config.Source, sessStore
 		}
 
 		team := loadResult.Team
-		agent, err := team.Agent(f.agentName)
+		agt, err := team.Agent(f.agentName)
 		if err != nil {
 			return nil, nil, nil, err
 		}
@@ -530,6 +531,11 @@ func (f *runExecFlags) createSessionSpawner(agentSource config.Source, sessStore
 			ModelsGateway:      runConfigCopy.ModelsGateway,
 			EnvProvider:        runConfigCopy.EnvProvider(),
 			AgentDefaultModels: loadResult.AgentDefaultModels,
+		}
+
+		// Merge global permissions into the team's checker
+		if f.globalPermissions != nil && !f.globalPermissions.IsEmpty() {
+			team.SetPermissions(permissions.Merge(team.Permissions(), f.globalPermissions))
 		}
 
 		// Create the local runtime
@@ -544,7 +550,7 @@ func (f *runExecFlags) createSessionSpawner(agentSource config.Source, sessStore
 		}
 
 		// Create a new session
-		newSess := session.New(f.buildSessionOpts(agent.MaxIterations(), agent.ThinkingConfigured(), workingDir)...)
+		newSess := session.New(f.buildSessionOpts(agt, workingDir)...)
 
 		// Create cleanup function
 		cleanup := func() {

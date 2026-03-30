@@ -37,6 +37,7 @@ func defaultExitConfirmationKeyMap() exitConfirmationKeyMap {
 
 type exitConfirmationDialog struct {
 	BaseDialog
+
 	keyMap exitConfirmationKeyMap
 }
 

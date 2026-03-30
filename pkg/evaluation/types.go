@@ -10,6 +10,7 @@ import (
 // InputSession wraps a session with its source path for evaluation loading.
 type InputSession struct {
 	*session.Session
+
 	SourcePath string // Path to the source eval file (not serialized)
 }
 

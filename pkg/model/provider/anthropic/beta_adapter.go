@@ -15,6 +15,7 @@ import (
 // betaStreamAdapter adapts the Anthropic Beta stream to our interface
 type betaStreamAdapter struct {
 	retryableStream[anthropic.BetaRawMessageStreamEventUnion]
+
 	trackUsage         bool
 	toolCall           bool
 	toolID             string
@@ -42,7 +43,7 @@ func (a *betaStreamAdapter) Recv() (chat.MessageStreamResponse, error) {
 	response := chat.MessageStreamResponse{
 		ID:     event.Message.ID,
 		Object: "chat.completion.chunk",
-		Model:  string(event.Message.Model),
+		Model:  event.Message.Model,
 		Choices: []chat.MessageStreamChoice{
 			{
 				Index: 0,

@@ -13,6 +13,7 @@ import (
 
 type toonTools struct {
 	tools.ToolSet
+
 	toolRegexps []*regexp.Regexp
 }
 

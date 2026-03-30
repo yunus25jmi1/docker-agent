@@ -34,13 +34,13 @@ type Agent struct {
 	addDescriptionParameter bool
 	maxIterations           int
 	maxConsecutiveToolCalls int
+	maxOldToolCallTokens    int
 	numHistoryItems         int
 	addPromptFiles          []string
 	tools                   []tools.Tool
 	commands                types.Commands
 	pendingWarnings         []string
 	hooks                   *latest.HooksConfig
-	thinkingConfigured      bool // true if thinking_budget was explicitly set in config
 }
 
 // New creates a new agent
@@ -82,19 +82,16 @@ func (a *Agent) MaxConsecutiveToolCalls() int {
 	return a.maxConsecutiveToolCalls
 }
 
+func (a *Agent) MaxOldToolCallTokens() int {
+	return a.maxOldToolCallTokens
+}
+
 func (a *Agent) NumHistoryItems() int {
 	return a.numHistoryItems
 }
 
 func (a *Agent) AddPromptFiles() []string {
 	return a.addPromptFiles
-}
-
-// ThinkingConfigured returns true if thinking_budget was explicitly set in the agent's config.
-// This is used to initialize session thinking state - thinking is only enabled by default
-// when the user explicitly configured it in their YAML.
-func (a *Agent) ThinkingConfigured() bool {
-	return a.thinkingConfigured
 }
 
 // Description returns the agent's description

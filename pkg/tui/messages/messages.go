@@ -4,7 +4,7 @@
 //   - session.go: Session lifecycle (new, exit, save, load, etc.)
 //   - theme.go: Theme selection and preview
 //   - agent.go: Agent switching and model selection
-//   - toggle.go: UI state toggles (YOLO, thinking, sidebar)
+//   - toggle.go: UI state toggles (YOLO, sidebar)
 //   - input.go: Editor input, attachments, and speech
 //   - mcp.go: MCP prompt interactions
 //

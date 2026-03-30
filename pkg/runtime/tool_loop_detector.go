@@ -24,6 +24,12 @@ func newToolLoopDetector(threshold int) *toolLoopDetector {
 	return &toolLoopDetector{threshold: threshold}
 }
 
+// reset clears the detector state so it can be reused after recovery.
+func (d *toolLoopDetector) reset() {
+	d.lastSignature = ""
+	d.consecutive = 0
+}
+
 // record updates the detector with the latest tool call batch and returns
 // true if the consecutive-duplicate threshold has been reached.
 func (d *toolLoopDetector) record(calls []tools.ToolCall) bool {

@@ -22,7 +22,7 @@ func TestDiskCache_FetchAndStore(t *testing.T) {
 
 	cache := newDiskCache(t.TempDir())
 
-	content, err := cache.FetchAndStore("https://example.com", "my-skill", "SKILL.md", srv.URL+"/SKILL.md")
+	content, err := cache.FetchAndStore(t.Context(), "https://example.com", "my-skill", "SKILL.md", srv.URL+"/SKILL.md")
 	require.NoError(t, err)
 	assert.Equal(t, "file content", content)
 
@@ -54,7 +54,7 @@ func TestDiskCache_Get_Cached(t *testing.T) {
 
 	cache := newDiskCache(t.TempDir())
 
-	_, err := cache.FetchAndStore("https://example.com", "skill", "SKILL.md", srv.URL+"/SKILL.md")
+	_, err := cache.FetchAndStore(t.Context(), "https://example.com", "skill", "SKILL.md", srv.URL+"/SKILL.md")
 	require.NoError(t, err)
 
 	content, ok := cache.Get("https://example.com", "skill", "SKILL.md")
@@ -71,7 +71,7 @@ func TestDiskCache_Get_Expired(t *testing.T) {
 
 	cache := newDiskCache(t.TempDir())
 
-	_, err := cache.FetchAndStore("https://example.com", "skill", "SKILL.md", srv.URL+"/SKILL.md")
+	_, err := cache.FetchAndStore(t.Context(), "https://example.com", "skill", "SKILL.md", srv.URL+"/SKILL.md")
 	require.NoError(t, err)
 
 	// The max-age=0 should make it immediately expired
@@ -87,7 +87,7 @@ func TestDiskCache_NestedFiles(t *testing.T) {
 
 	cache := newDiskCache(t.TempDir())
 
-	content, err := cache.FetchAndStore("https://example.com", "my-skill", "references/FORMS.md", srv.URL+"/file")
+	content, err := cache.FetchAndStore(t.Context(), "https://example.com", "my-skill", "references/FORMS.md", srv.URL+"/file")
 	require.NoError(t, err)
 	assert.Equal(t, "nested file content", content)
 
@@ -152,7 +152,7 @@ func TestDiskCache_HTTPError(t *testing.T) {
 
 	cache := newDiskCache(t.TempDir())
 
-	_, err := cache.FetchAndStore("https://example.com", "skill", "SKILL.md", srv.URL+"/notfound")
+	_, err := cache.FetchAndStore(t.Context(), "https://example.com", "skill", "SKILL.md", srv.URL+"/notfound")
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "HTTP 404")
 }

@@ -18,10 +18,10 @@ import (
 )
 
 const (
-	// MaxToolCallTokens is the maximum number of tokens to keep from tool call
+	// DefaultMaxOldToolCallTokens is the default maximum number of tokens to keep from tool call
 	// arguments and results. Older tool calls beyond this budget will have their
 	// content replaced with a placeholder. Tokens are approximated as len/4.
-	MaxToolCallTokens = 40000
+	DefaultMaxOldToolCallTokens = 40000
 
 	// toolContentPlaceholder is the text used to replace truncated tool content
 	toolContentPlaceholder = "[content truncated]"
@@ -76,12 +76,6 @@ type Session struct {
 	// ToolsApproved is a flag to indicate if the tools have been approved
 	ToolsApproved bool `json:"tools_approved"`
 
-	// Thinking is a session-level flag to enable thinking/interleaved thinking
-	// defaults for all providers. When false, providers will not apply auto-thinking budgets
-	// or interleaved thinking, regardless of model config. This is controlled by the /think
-	// command in the TUI. Defaults to true (thinking enabled).
-	Thinking bool `json:"thinking"`
-
 	// HideToolResults is a flag to indicate if tool results should be hidden
 	HideToolResults bool `json:"hide_tool_results"`
 
@@ -99,6 +93,13 @@ type Session struct {
 	// batches before the agent is terminated. Prevents degenerate loops where the model
 	// repeatedly issues the same call without making progress. Default: 5.
 	MaxConsecutiveToolCalls int `json:"max_consecutive_tool_calls,omitempty"`
+
+	// MaxOldToolCallTokens is the maximum number of tokens to keep from old tool call
+	// arguments and results. Older tool calls beyond this budget will have their
+	// content replaced with a placeholder. Tokens are approximated as len/4.
+	// Set to -1 to disable truncation (unlimited tool content).
+	// Default: 40000 (when not configured or set to 0).
+	MaxOldToolCallTokens int `json:"max_old_tool_call_tokens,omitempty"`
 
 	// Starred indicates if this session has been starred by the user
 	Starred bool `json:"starred"`
@@ -448,6 +449,15 @@ func WithMaxConsecutiveToolCalls(n int) Opt {
 	}
 }
 
+// WithMaxOldToolCallTokens sets the maximum token budget for old tool call content.
+// Set to -1 to disable truncation (unlimited tool content).
+// Set to 0 to use the default (40000).
+func WithMaxOldToolCallTokens(n int) Opt {
+	return func(s *Session) {
+		s.MaxOldToolCallTokens = n
+	}
+}
+
 func WithWorkingDir(workingDir string) Opt {
 	return func(s *Session) {
 		s.WorkingDir = workingDir
@@ -460,15 +470,15 @@ func WithTitle(title string) Opt {
 	}
 }
 
-func WithToolsApproved(toolsApproved bool) Opt {
+func WithMessages(messages []Item) Opt {
 	return func(s *Session) {
-		s.ToolsApproved = toolsApproved
+		s.Messages = messages
 	}
 }
 
-func WithThinking(thinking bool) Opt {
+func WithToolsApproved(toolsApproved bool) Opt {
 	return func(s *Session) {
-		s.Thinking = thinking
+		s.ToolsApproved = toolsApproved
 	}
 }
 
@@ -573,7 +583,6 @@ func New(opts ...Opt) *Session {
 		ID:              sessionID,
 		CreatedAt:       time.Now(),
 		SendUserMessage: true,
-		Thinking:        false,
 	}
 
 	for _, opt := range opts {
@@ -794,7 +803,15 @@ func (s *Session) GetMessages(a *agent.Agent) []chat.Message {
 		messages = trimMessages(messages, maxItems)
 	}
 
-	messages = truncateOldToolContent(messages, MaxToolCallTokens)
+	// Use configured max tokens or fall back to default constant if zero or unset.
+	// -1 means unlimited (no truncation).
+	maxOldToolCallTokens := s.MaxOldToolCallTokens
+	if maxOldToolCallTokens == 0 {
+		maxOldToolCallTokens = DefaultMaxOldToolCallTokens
+	}
+	if maxOldToolCallTokens > 0 { // If maxOldToolCallTokens is -1, skip truncation (unlimited)
+		messages = truncateOldToolContent(messages, maxOldToolCallTokens)
+	}
 
 	systemCount := 0
 	conversationCount := 0

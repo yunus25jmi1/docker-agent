@@ -14,7 +14,6 @@ import (
 type SessionStateReader interface {
 	SplitDiffView() bool
 	YoloMode() bool
-	Thinking() bool
 	HideToolResults() bool
 	CurrentAgentName() string
 	PreviousMessage() *types.Message
@@ -32,7 +31,6 @@ var _ SessionStateReader = (*SessionState)(nil)
 type SessionState struct {
 	splitDiffView   bool
 	yoloMode        bool
-	thinking        bool
 	hideToolResults bool
 	sessionTitle    string
 
@@ -45,7 +43,6 @@ func NewSessionState(s *session.Session) *SessionState {
 	return &SessionState{
 		splitDiffView:   userconfig.Get().GetSplitDiffView(),
 		yoloMode:        s.ToolsApproved,
-		thinking:        s.Thinking,
 		hideToolResults: s.HideToolResults,
 		sessionTitle:    s.Title,
 	}
@@ -65,14 +62,6 @@ func (s *SessionState) YoloMode() bool {
 
 func (s *SessionState) SetYoloMode(yoloMode bool) {
 	s.yoloMode = yoloMode
-}
-
-func (s *SessionState) Thinking() bool {
-	return s.thinking
-}
-
-func (s *SessionState) SetThinking(thinking bool) {
-	s.thinking = thinking
 }
 
 func (s *SessionState) HideToolResults() bool {

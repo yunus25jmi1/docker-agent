@@ -13,9 +13,10 @@ import (
 	"github.com/goccy/go-yaml"
 
 	"github.com/docker/docker-agent/pkg/config/types"
+	"github.com/docker/docker-agent/pkg/effort"
 )
 
-const Version = "7"
+const Version = "8"
 
 // Config represents the entire configuration file
 type Config struct {
@@ -24,9 +25,10 @@ type Config struct {
 	Providers   map[string]ProviderConfig `json:"providers,omitempty"`
 	Models      map[string]ModelConfig    `json:"models,omitempty"`
 	MCPs        map[string]MCPToolset     `json:"mcps,omitempty"`
-	RAG         map[string]RAGConfig      `json:"rag,omitempty"`
+	RAG         map[string]RAGToolset     `json:"rag,omitempty"`
 	Metadata    Metadata                  `json:"metadata"`
 	Permissions *PermissionsConfig        `json:"permissions,omitempty"`
+	Audit       *AuditConfig              `json:"audit,omitempty"`
 }
 
 // MCPToolset is a reusable MCP server definition stored in the top-level
@@ -49,6 +51,96 @@ func (m *MCPToolset) UnmarshalYAML(unmarshal func(any) error) error {
 	m.Toolset = Toolset(tmp)
 	m.Type = "mcp"
 	return m.validate()
+}
+
+// RAGToolset is a reusable RAG source definition stored in the top-level
+// "rag" section. It is identical to a Toolset but skips the normal
+// Toolset.validate() call during YAML unmarshaling because the "type"
+// field is implicit (always "rag") and the RAG config is validated
+// during config resolution.
+type RAGToolset struct {
+	Toolset `json:",inline" yaml:",inline"`
+}
+
+func (r RAGToolset) MarshalYAML() (any, error) {
+	// Flatten RAGConfig fields alongside toolset fields into a single map.
+	result := make(map[string]any)
+
+	if r.Instruction != "" {
+		result["instruction"] = r.Instruction
+	}
+	if len(r.Tools) > 0 {
+		result["tools"] = r.Tools
+	}
+	if r.Name != "" {
+		result["name"] = r.Name
+	}
+	if !r.Defer.IsEmpty() {
+		result["defer"] = r.Defer
+	}
+
+	if r.RAGConfig != nil {
+		cfg := r.RAGConfig
+		result["tool"] = cfg.Tool
+		if len(cfg.Docs) > 0 {
+			result["docs"] = cfg.Docs
+		}
+		if cfg.RespectVCS != nil {
+			result["respect_vcs"] = *cfg.RespectVCS
+		}
+		if len(cfg.Strategies) > 0 {
+			result["strategies"] = cfg.Strategies
+		}
+		result["results"] = cfg.Results
+	}
+
+	return result, nil
+}
+
+func (r *RAGToolset) UnmarshalYAML(unmarshal func(any) error) error {
+	// RAGToolset flattens RAGConfig fields directly at the top level,
+	// so users write tool/docs/strategies alongside toolset fields
+	// (instruction, tools, name, defer) without a rag_config wrapper.
+	//
+	// We unmarshal into a raw map first to avoid strict-mode errors
+	// from fields that belong to RAGConfig but not Toolset.
+	var raw map[string]any
+	if err := unmarshal(&raw); err != nil {
+		return err
+	}
+
+	// Extract toolset-level fields
+	var tf Toolset
+	tf.Type = "rag"
+	if v, ok := raw["instruction"].(string); ok {
+		tf.Instruction = v
+	}
+	if v, ok := raw["name"].(string); ok {
+		tf.Name = v
+	}
+	if v, ok := raw["tools"]; ok {
+		if arr, ok := v.([]any); ok {
+			for _, item := range arr {
+				if s, ok := item.(string); ok {
+					tf.Tools = append(tf.Tools, s)
+				}
+			}
+		}
+	}
+	if v, ok := raw["defer"]; ok {
+		data, _ := yaml.Marshal(v)
+		_ = yaml.Unmarshal(data, &tf.Defer)
+	}
+
+	// Unmarshal RAGConfig from the same map (it has its own UnmarshalYAML)
+	var ragCfg RAGConfig
+	if err := unmarshal(&ragCfg); err != nil {
+		return err
+	}
+
+	tf.RAGConfig = &ragCfg
+	r.Toolset = tf
+	return nil
 }
 
 type Agents []AgentConfig
@@ -235,22 +327,23 @@ func (d Duration) MarshalJSON() ([]byte, error) {
 
 // AgentConfig represents a single agent configuration
 type AgentConfig struct {
-	Name                    string
-	Model                   string            `json:"model,omitempty"`
-	Fallback                *FallbackConfig   `json:"fallback,omitempty"`
-	Description             string            `json:"description,omitempty"`
-	WelcomeMessage          string            `json:"welcome_message,omitempty"`
-	Toolsets                []Toolset         `json:"toolsets,omitempty"`
-	Instruction             string            `json:"instruction,omitempty"`
-	SubAgents               []string          `json:"sub_agents,omitempty"`
-	Handoffs                []string          `json:"handoffs,omitempty"`
-	RAG                     []string          `json:"rag,omitempty"`
+	Name           string
+	Model          string          `json:"model,omitempty"`
+	Fallback       *FallbackConfig `json:"fallback,omitempty"`
+	Description    string          `json:"description,omitempty"`
+	WelcomeMessage string          `json:"welcome_message,omitempty"`
+	Toolsets       []Toolset       `json:"toolsets,omitempty"`
+	Instruction    string          `json:"instruction,omitempty"`
+	SubAgents      []string        `json:"sub_agents,omitempty"`
+	Handoffs       []string        `json:"handoffs,omitempty"`
+
 	AddDate                 bool              `json:"add_date,omitempty"`
 	AddEnvironmentInfo      bool              `json:"add_environment_info,omitempty"`
 	CodeModeTools           bool              `json:"code_mode_tools,omitempty"`
 	AddDescriptionParameter bool              `json:"add_description_parameter,omitempty"`
 	MaxIterations           int               `json:"max_iterations,omitempty"`
 	MaxConsecutiveToolCalls int               `json:"max_consecutive_tool_calls,omitempty"`
+	MaxOldToolCallTokens    int               `json:"max_old_tool_call_tokens,omitempty"`
 	NumHistoryItems         int               `json:"num_history_items,omitempty"`
 	AddPromptFiles          []string          `json:"add_prompt_files,omitempty" yaml:"add_prompt_files,omitempty"`
 	Commands                types.Commands    `json:"commands,omitempty"`
@@ -396,13 +489,10 @@ type ModelConfig struct {
 	// ProviderOpts allows provider-specific options.
 	ProviderOpts map[string]any `json:"provider_opts,omitempty"`
 	TrackUsage   *bool          `json:"track_usage,omitempty"`
-	// ThinkingBudget controls reasoning effort/budget:
-	// - For OpenAI: accepts string levels "minimal", "low", "medium", "high"
-	// - For Anthropic: accepts integer token budget (1024-32000), "adaptive",
-	//   or string levels "low", "medium", "high", "max" (uses adaptive thinking with effort)
-	// - For Bedrock Claude: accepts integer token budget or string levels
-	//   "minimal", "low", "medium", "high" (mapped to token budgets via EffortTokens)
-	// - For other providers: may be ignored
+	// ThinkingBudget controls reasoning effort/budget.
+	// Accepts an integer token count or a string effort level.
+	// See [effort.ValidNames] for the full list of accepted strings.
+	// Provider-specific mappings are in the effort package.
 	ThinkingBudget *ThinkingBudget `json:"thinking_budget,omitempty"`
 	// Routing defines rules for routing requests to different models.
 	// When routing is configured, this model becomes a rule-based router:
@@ -608,6 +698,9 @@ type Toolset struct {
 	// For the `fetch` tool
 	Timeout int `json:"timeout,omitempty"`
 
+	// For the `rag` tool
+	RAGConfig *RAGConfig `json:"rag_config,omitempty" yaml:"rag_config,omitempty"`
+
 	// For the `model_picker` tool
 	Models []string `json:"models,omitempty"`
 }
@@ -672,29 +765,13 @@ func (d DeferConfig) MarshalYAML() (any, error) {
 }
 
 // ThinkingBudget represents reasoning budget configuration.
-// It accepts either a string effort level or an integer token budget:
-// - String: "minimal", "low", "medium", "high" (for OpenAI)
-// - String: "adaptive" (for Anthropic models that support adaptive thinking)
-// - Integer: token count (for Anthropic, range 1024-32768)
+// It accepts either a string effort level (see [effort.ValidNames]) or an
+// integer token budget.
 type ThinkingBudget struct {
 	// Effort stores string-based reasoning effort levels
 	Effort string `json:"effort,omitempty"`
 	// Tokens stores integer-based token budgets
 	Tokens int `json:"tokens,omitempty"`
-}
-
-// validThinkingEfforts lists all accepted string values for thinking_budget.
-const validThinkingEfforts = "none, minimal, low, medium, high, max, adaptive"
-
-// isValidThinkingEffort reports whether s (case-insensitive, trimmed) is a
-// recognised thinking_budget effort level.
-func isValidThinkingEffort(s string) bool {
-	switch strings.ToLower(strings.TrimSpace(s)) {
-	case "none", "minimal", "low", "medium", "high", "max", "adaptive":
-		return true
-	default:
-		return false
-	}
 }
 
 func (t *ThinkingBudget) UnmarshalYAML(unmarshal func(any) error) error {
@@ -708,8 +785,8 @@ func (t *ThinkingBudget) UnmarshalYAML(unmarshal func(any) error) error {
 	// Try string level
 	var s string
 	if err := unmarshal(&s); err == nil {
-		if !isValidThinkingEffort(s) {
-			return fmt.Errorf("invalid thinking_budget effort %q: must be one of %s", s, validThinkingEfforts)
+		if !effort.IsValid(s) {
+			return fmt.Errorf("invalid thinking_budget effort %q: must be one of %s", s, effort.ValidNames())
 		}
 		*t = ThinkingBudget{Effort: s}
 		return nil
@@ -752,37 +829,52 @@ func (t *ThinkingBudget) IsDisabled() bool {
 
 // IsAdaptive returns true if the thinking budget is set to adaptive mode.
 // Adaptive thinking lets the model decide how much thinking to do.
+// Matches both "adaptive" and "adaptive/<effort>" formats.
 func (t *ThinkingBudget) IsAdaptive() bool {
 	if t == nil {
 		return false
 	}
-	return strings.EqualFold(t.Effort, "adaptive")
+	norm := strings.ToLower(strings.TrimSpace(t.Effort))
+	return norm == "adaptive" || strings.HasPrefix(norm, "adaptive/")
+}
+
+// EffortLevel parses the Effort field into an [effort.Level].
+// Returns ("", false) when the budget is nil, uses token counts, or has an
+// unrecognised effort string.
+func (t *ThinkingBudget) EffortLevel() (effort.Level, bool) {
+	if t == nil {
+		return "", false
+	}
+	return effort.Parse(t.Effort)
+}
+
+// AdaptiveEffort returns the effort level for adaptive thinking.
+// For "adaptive" it returns the default ("high").
+// For "adaptive/<effort>" it returns the specified effort.
+// Returns ("", false) if the budget is not adaptive.
+func (t *ThinkingBudget) AdaptiveEffort() (string, bool) {
+	if !t.IsAdaptive() {
+		return "", false
+	}
+	norm := strings.ToLower(strings.TrimSpace(t.Effort))
+	if after, ok := strings.CutPrefix(norm, "adaptive/"); ok && after != "" {
+		return after, true
+	}
+	return "high", true
 }
 
 // EffortTokens maps a string effort level to a token budget for providers
 // that only support token-based thinking (e.g. Bedrock Claude).
-//
-// The Anthropic direct API uses adaptive thinking + output_config.effort
-// for string levels instead; see anthropicEffort in the anthropic package.
+// Delegates to [effort.BedrockTokens].
 //
 // Returns (tokens, true) when a mapping exists, or (0, false) when
 // the budget uses an explicit token count or an unrecognised effort string.
 func (t *ThinkingBudget) EffortTokens() (int, bool) {
-	if t == nil || t.Effort == "" {
+	l, ok := t.EffortLevel()
+	if !ok {
 		return 0, false
 	}
-	switch strings.ToLower(strings.TrimSpace(t.Effort)) {
-	case "minimal":
-		return 1024, true
-	case "low":
-		return 2048, true
-	case "medium":
-		return 8192, true
-	case "high":
-		return 16384, true
-	default:
-		return 0, false
-	}
+	return effort.BedrockTokens(l)
 }
 
 // MarshalJSON implements custom marshaling to output simple string or int format
@@ -810,8 +902,8 @@ func (t *ThinkingBudget) UnmarshalJSON(data []byte) error {
 	// Try string level
 	var s string
 	if err := json.Unmarshal(data, &s); err == nil {
-		if !isValidThinkingEffort(s) {
-			return fmt.Errorf("invalid thinking_budget effort %q: must be one of %s", s, validThinkingEfforts)
+		if !effort.IsValid(s) {
+			return fmt.Errorf("invalid thinking_budget effort %q: must be one of %s", s, effort.ValidNames())
 		}
 		*t = ThinkingBudget{Effort: s}
 		return nil
@@ -1292,6 +1384,62 @@ type PermissionsConfig struct {
 	Ask []string `json:"ask,omitempty"`
 	// Deny lists tool name patterns that are always rejected
 	Deny []string `json:"deny,omitempty"`
+}
+
+// AuditConfig represents audit trail configuration for governance and compliance.
+// When enabled, all agent actions (tool calls, file operations, HTTP requests, etc.)
+// are recorded with cryptographic signatures for tamper-proof audit trails.
+type AuditConfig struct {
+	// Enabled enables audit trail recording
+	Enabled bool `json:"enabled,omitempty"`
+	// StoragePath is the directory to store audit records (default: data dir)
+	StoragePath string `json:"storage_path,omitempty"`
+	// KeyPath is the path to the signing key file (default: storage_path/audit_key)
+	KeyPath string `json:"key_path,omitempty"`
+	// RecordToolCalls enables recording of tool calls (default: true if enabled)
+	RecordToolCalls *bool `json:"record_tool_calls,omitempty"`
+	// RecordFileOps enables recording of file operations (default: true if enabled)
+	RecordFileOps *bool `json:"record_file_ops,omitempty"`
+	// RecordHTTP enables recording of HTTP requests (default: true if enabled)
+	RecordHTTP *bool `json:"record_http,omitempty"`
+	// RecordCommands enables recording of command executions (default: true if enabled)
+	RecordCommands *bool `json:"record_commands,omitempty"`
+	// RecordSessions enables recording of session start/end events (default: true if enabled)
+	RecordSessions *bool `json:"record_sessions,omitempty"`
+	// IncludeInputContent includes user input content in audit records (default: false)
+	IncludeInputContent bool `json:"include_input_content,omitempty"`
+	// IncludeOutputContent includes tool output content in audit records (default: false)
+	IncludeOutputContent bool `json:"include_output_content,omitempty"`
+}
+
+// IsEnabled returns true if auditing is enabled
+func (c *AuditConfig) IsEnabled() bool {
+	return c != nil && c.Enabled
+}
+
+// ShouldRecordToolCalls returns true if tool calls should be recorded
+func (c *AuditConfig) ShouldRecordToolCalls() bool {
+	return c.IsEnabled() && (c.RecordToolCalls == nil || *c.RecordToolCalls)
+}
+
+// ShouldRecordFileOps returns true if file operations should be recorded
+func (c *AuditConfig) ShouldRecordFileOps() bool {
+	return c.IsEnabled() && (c.RecordFileOps == nil || *c.RecordFileOps)
+}
+
+// ShouldRecordHTTP returns true if HTTP requests should be recorded
+func (c *AuditConfig) ShouldRecordHTTP() bool {
+	return c.IsEnabled() && (c.RecordHTTP == nil || *c.RecordHTTP)
+}
+
+// ShouldRecordCommands returns true if commands should be recorded
+func (c *AuditConfig) ShouldRecordCommands() bool {
+	return c.IsEnabled() && (c.RecordCommands == nil || *c.RecordCommands)
+}
+
+// ShouldRecordSessions returns true if session events should be recorded
+func (c *AuditConfig) ShouldRecordSessions() bool {
+	return c.IsEnabled() && (c.RecordSessions == nil || *c.RecordSessions)
 }
 
 // HooksConfig represents the hooks configuration for an agent.

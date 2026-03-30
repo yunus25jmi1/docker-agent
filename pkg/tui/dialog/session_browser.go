@@ -39,6 +39,7 @@ const (
 
 type sessionBrowserDialog struct {
 	BaseDialog
+
 	textInput  textinput.Model
 	sessions   []session.Summary
 	filtered   []session.Summary
