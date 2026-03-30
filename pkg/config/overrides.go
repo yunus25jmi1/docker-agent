@@ -110,8 +110,11 @@ func ensureModelsExist(cfg *latest.Config) error {
 	}
 
 	// Ensure models referenced by RAG strategies exist
-	for ragName, ragCfg := range cfg.RAG {
-		for _, stratCfg := range ragCfg.Strategies {
+	for ragName, ragToolset := range cfg.RAG {
+		if ragToolset.RAGConfig == nil {
+			continue
+		}
+		for _, stratCfg := range ragToolset.RAGConfig.Strategies {
 			rawModel, ok := stratCfg.Params["model"]
 			if !ok {
 				continue

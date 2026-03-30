@@ -13,6 +13,7 @@ import (
 
 type remoteMCPClient struct {
 	sessionClient
+
 	url           string
 	transportType string
 	headers       map[string]string

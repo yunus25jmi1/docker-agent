@@ -17,6 +17,7 @@ import (
 // It displays a URL for the user to visit and waits for confirmation.
 type URLElicitationDialog struct {
 	BaseDialog
+
 	message     string
 	url         string
 	keyMap      ConfirmKeyMap

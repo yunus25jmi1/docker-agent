@@ -53,31 +53,11 @@ func (p *countingProvider) CreateChatCompletionStream(context.Context, []chat.Me
 func (p *countingProvider) BaseConfig() base.Config { return base.Config{} }
 func (p *countingProvider) MaxTokens() int          { return 0 }
 
-// trackingConfigProvider tracks how many times BaseConfig() is called.
-// This is used to verify that fallback providers are cloned (via CloneWithOptions)
-// which calls BaseConfig() to get the config to clone from.
-type trackingConfigProvider struct {
-	id              string
-	stream          chat.MessageStream
-	baseConfigCalls int
-}
-
-func (p *trackingConfigProvider) ID() string { return p.id }
-func (p *trackingConfigProvider) CreateChatCompletionStream(context.Context, []chat.Message, []tools.Tool) (chat.MessageStream, error) {
-	return p.stream, nil
-}
-
-func (p *trackingConfigProvider) BaseConfig() base.Config {
-	p.baseConfigCalls++
-	return base.Config{}
-}
-
 // Verify interface compliance
 var (
 	_ provider.Provider = (*mockProvider)(nil)
 	_ provider.Provider = (*failingProvider)(nil)
 	_ provider.Provider = (*countingProvider)(nil)
-	_ provider.Provider = (*trackingConfigProvider)(nil)
 )
 
 func TestBuildModelChain(t *testing.T) {
@@ -397,76 +377,6 @@ func TestGetEffectiveRetries(t *testing.T) {
 
 	agentNoRetries := agent.New("no-retries", "test", agent.WithModel(mockModel), agent.WithFallbackModel(mockFallback), agent.WithFallbackRetries(-1))
 	assert.Equal(t, 0, getEffectiveRetries(agentNoRetries), "retries=-1 should return 0 (no retries)")
-}
-
-func TestFallbackModelsAreClonedWithThinkingOverride(t *testing.T) {
-	synctest.Test(t, func(t *testing.T) {
-		primary := &failingProvider{id: "primary/fail", err: errors.New("401 unauthorized")}
-		fallbackStream := newStreamBuilder().
-			AddContent("Success from cloned fallback").
-			AddStopWithUsage(10, 5).
-			Build()
-		fallback := &trackingConfigProvider{id: "fallback/tracked", stream: fallbackStream}
-
-		root := agent.New("root", "test",
-			agent.WithModel(primary),
-			agent.WithFallbackModel(fallback),
-			agent.WithFallbackRetries(0),
-		)
-
-		tm := team.New(team.WithAgents(root))
-		rt, err := NewLocalRuntime(tm, WithSessionCompaction(false), WithModelStore(mockModelStore{}))
-		require.NoError(t, err)
-
-		sess := session.New(session.WithUserMessage("test"))
-		sess.Title = "Fallback Cloning Test"
-		sess.Thinking = false
-
-		var gotContent bool
-		for ev := range rt.RunStream(t.Context(), sess) {
-			if choice, ok := ev.(*AgentChoiceEvent); ok && choice.Content == "Success from cloned fallback" {
-				gotContent = true
-			}
-		}
-		assert.True(t, gotContent, "should receive content from fallback")
-		assert.GreaterOrEqual(t, fallback.baseConfigCalls, 1,
-			"BaseConfig() should be called on fallback provider (proves cloning occurred)")
-	})
-}
-
-func TestFallbackModelsClonedWithThinkingEnabled(t *testing.T) {
-	synctest.Test(t, func(t *testing.T) {
-		primary := &failingProvider{id: "primary/fail", err: errors.New("401 unauthorized")}
-		fallbackStream := newStreamBuilder().
-			AddContent("Success with thinking enabled").
-			AddStopWithUsage(10, 5).
-			Build()
-		fallback := &trackingConfigProvider{id: "fallback/tracked", stream: fallbackStream}
-
-		root := agent.New("root", "test",
-			agent.WithModel(primary),
-			agent.WithFallbackModel(fallback),
-			agent.WithFallbackRetries(0),
-		)
-
-		tm := team.New(team.WithAgents(root))
-		rt, err := NewLocalRuntime(tm, WithSessionCompaction(false), WithModelStore(mockModelStore{}))
-		require.NoError(t, err)
-
-		sess := session.New(session.WithUserMessage("test"))
-		sess.Title = "Fallback Cloning Test (Thinking Enabled)"
-		sess.Thinking = true
-
-		var gotContent bool
-		for ev := range rt.RunStream(t.Context(), sess) {
-			if choice, ok := ev.(*AgentChoiceEvent); ok && choice.Content == "Success with thinking enabled" {
-				gotContent = true
-			}
-		}
-		assert.True(t, gotContent, "should receive content from fallback")
-		assert.GreaterOrEqual(t, fallback.baseConfigCalls, 1,
-			"BaseConfig() should be called on fallback provider when thinking is enabled")
-	})
 }
 
 func TestFallback429WithFallbacksSkipsToNextModel(t *testing.T) {

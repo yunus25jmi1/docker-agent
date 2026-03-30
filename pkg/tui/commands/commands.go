@@ -10,7 +10,6 @@ import (
 
 	"github.com/docker/docker-agent/pkg/app"
 	"github.com/docker/docker-agent/pkg/feedback"
-	"github.com/docker/docker-agent/pkg/modelsdev"
 	"github.com/docker/docker-agent/pkg/tui/components/toolcommon"
 	"github.com/docker/docker-agent/pkg/tui/core"
 	"github.com/docker/docker-agent/pkg/tui/messages"
@@ -33,10 +32,21 @@ type Item struct {
 	Category     string
 	SlashCommand string
 	Execute      ExecuteFunc
+	Hidden       bool // Hidden commands work as slash commands but don't appear in the palette
 }
 
 func builtInSessionCommands() []Item {
 	cmds := []Item{
+		{
+			ID:           "session.clear",
+			Label:        "Clear",
+			SlashCommand: "/clear",
+			Description:  "Clear the current tab and start a new session",
+			Category:     "Session",
+			Execute: func(string) tea.Cmd {
+				return core.CmdHandler(messages.ClearSessionMsg{})
+			},
+		},
 		{
 			ID:           "session.attach",
 			Label:        "Attach",
@@ -119,8 +129,9 @@ func builtInSessionCommands() []Item {
 		},
 		{
 			ID:           "session.q",
-			Label:        "Quit (short)",
+			Label:        "Quit",
 			SlashCommand: "/q",
+			Hidden:       true,
 			Description:  "Quit the application (alias for /exit)",
 			Category:     "Session",
 			Execute: func(string) tea.Cmd {
@@ -197,14 +208,15 @@ func builtInSessionCommands() []Item {
 				return core.CmdHandler(messages.ToggleSessionStarMsg{})
 			},
 		},
+
 		{
-			ID:           "session.think",
-			Label:        "Think",
-			SlashCommand: "/think",
-			Description:  "Toggle thinking/reasoning mode",
+			ID:           "session.tools",
+			Label:        "Tools",
+			SlashCommand: "/tools",
+			Description:  "Show all tools available to the current agent",
 			Category:     "Session",
 			Execute: func(string) tea.Cmd {
-				return core.CmdHandler(messages.ToggleThinkingMsg{})
+				return core.CmdHandler(messages.ShowToolsDialogMsg{})
 			},
 		},
 		{
@@ -291,6 +303,17 @@ func builtInFeedbackCommands() []Item {
 	}
 }
 
+// visibleOnly returns items that are not hidden.
+func visibleOnly(items []Item) []Item {
+	visible := make([]Item, 0, len(items))
+	for _, item := range items {
+		if !item.Hidden {
+			visible = append(visible, item)
+		}
+	}
+	return visible
+}
+
 // sortByLabel returns items sorted alphabetically by label.
 func sortByLabel(items []Item) []Item {
 	slices.SortFunc(items, func(a, b Item) int {
@@ -303,29 +326,6 @@ func sortByLabel(items []Item) []Item {
 func BuildCommandCategories(ctx context.Context, application *app.App) []Category {
 	// Get session commands and filter based on model capabilities
 	sessionCommands := builtInSessionCommands()
-
-	// Check if the current model supports reasoning; hide /think if not
-	currentModel := application.CurrentAgentModel()
-	if !modelsdev.ModelSupportsReasoning(ctx, currentModel) {
-		filtered := make([]Item, 0, len(sessionCommands))
-		for _, cmd := range sessionCommands {
-			if cmd.ID != "session.think" {
-				filtered = append(filtered, cmd)
-			}
-		}
-		sessionCommands = filtered
-	}
-
-	// Hide /permissions if no permissions are configured
-	if !application.HasPermissions() {
-		filtered := make([]Item, 0, len(sessionCommands))
-		for _, cmd := range sessionCommands {
-			if cmd.ID != "session.permissions" {
-				filtered = append(filtered, cmd)
-			}
-		}
-		sessionCommands = filtered
-	}
 
 	categories := []Category{
 		{
@@ -352,7 +352,7 @@ func BuildCommandCategories(ctx context.Context, application *app.App) []Categor
 
 		categories = append(categories, Category{
 			Name:     "Agent Commands",
-			Commands: sortByLabel(commands),
+			Commands: commands,
 		})
 	}
 
@@ -424,7 +424,7 @@ func BuildCommandCategories(ctx context.Context, application *app.App) []Categor
 
 		categories = append(categories, Category{
 			Name:     "MCP Prompts",
-			Commands: sortByLabel(mcpCommands),
+			Commands: mcpCommands,
 		})
 	}
 
@@ -454,7 +454,7 @@ func BuildCommandCategories(ctx context.Context, application *app.App) []Categor
 
 		categories = append(categories, Category{
 			Name:     "Skills",
-			Commands: sortByLabel(skillCommands),
+			Commands: skillCommands,
 		})
 	}
 
@@ -469,6 +469,11 @@ func BuildCommandCategories(ctx context.Context, application *app.App) []Categor
 			Commands: builtInFeedbackCommands(),
 		},
 	)
+
+	// Filter out hidden commands and sort by label in all categories.
+	for i := range categories {
+		categories[i].Commands = sortByLabel(visibleOnly(categories[i].Commands))
+	}
 
 	return categories
 }

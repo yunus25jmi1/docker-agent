@@ -13,6 +13,7 @@ import (
 	"github.com/anthropics/anthropic-sdk-go/packages/ssestream"
 
 	"github.com/docker/docker-agent/pkg/chat"
+	"github.com/docker/docker-agent/pkg/model/provider/providerutil"
 	"github.com/docker/docker-agent/pkg/rag/prompts"
 	"github.com/docker/docker-agent/pkg/rag/types"
 	"github.com/docker/docker-agent/pkg/tools"
@@ -70,7 +71,7 @@ func (c *Client) createBetaStream(
 	}
 
 	params := anthropic.BetaMessageNewParams{
-		Model:     anthropic.Model(c.ModelConfig.Model),
+		Model:     c.ModelConfig.Model,
 		MaxTokens: maxTokens,
 		System:    sys,
 		Messages:  converted,
@@ -91,45 +92,19 @@ func (c *Client) createBetaStream(
 		}
 	}
 
-	// Configure thinking if not explicitly disabled via /think command
-	// For interleaved thinking to make sense, we use a default of 16384 tokens for the thinking budget
-	thinkingEnabled := c.ModelOptions.Thinking() == nil || *c.ModelOptions.Thinking()
-	if thinkingEnabled {
-		if c.ModelConfig.ThinkingBudget != nil && c.ModelConfig.ThinkingBudget.IsAdaptive() {
-			// Adaptive thinking: let the model decide how much thinking to do
-			adaptive := anthropic.NewBetaThinkingConfigAdaptiveParam()
-			params.Thinking = anthropic.BetaThinkingConfigParamUnion{
-				OfAdaptive: &adaptive,
-			}
-			slog.Debug("Anthropic Beta API using adaptive thinking")
-		} else if effort, ok := anthropicEffort(c.ModelConfig.ThinkingBudget); ok {
-			// Effort level: use adaptive thinking + output_config.effort
-			adaptive := anthropic.NewBetaThinkingConfigAdaptiveParam()
-			params.Thinking = anthropic.BetaThinkingConfigParamUnion{
-				OfAdaptive: &adaptive,
-			}
+	// Configure thinking if a thinking budget is set in the model config.
+	// The beta client is also used for structured output and file attachments,
+	// which don't require thinking.
+	if budget := c.ModelConfig.ThinkingBudget; budget != nil {
+		if effort, ok := anthropicThinkingEffort(budget); ok {
+			adaptive := anthropic.BetaThinkingConfigAdaptiveParam{}
+			params.Thinking = anthropic.BetaThinkingConfigParamUnion{OfAdaptive: &adaptive}
 			params.OutputConfig.Effort = anthropic.BetaOutputConfigEffort(effort)
-			slog.Debug("Anthropic Beta API using adaptive thinking with effort",
-				"effort", effort)
-		} else {
-			thinkingTokens := int64(16384)
-			if c.ModelConfig.ThinkingBudget != nil {
-				thinkingTokens = int64(c.ModelConfig.ThinkingBudget.Tokens)
-			} else {
-				slog.Info("Anthropic Beta API using default thinking_budget with interleaved thinking", "budget_tokens", thinkingTokens)
-			}
-			switch {
-			case thinkingTokens >= 1024 && thinkingTokens < maxTokens:
-				params.Thinking = anthropic.BetaThinkingConfigParamOfEnabled(thinkingTokens)
-				slog.Debug("Anthropic Beta API using thinking_budget with interleaved thinking", "budget_tokens", thinkingTokens)
-			case thinkingTokens >= maxTokens:
-				slog.Warn("Anthropic Beta API thinking_budget must be less than max_tokens, ignoring", "tokens", thinkingTokens, "max_tokens", maxTokens)
-			default:
-				slog.Warn("Anthropic Beta API thinking_budget below minimum (1024), ignoring", "tokens", thinkingTokens)
-			}
+			slog.Debug("Anthropic Beta API using adaptive thinking", "effort", effort)
+		} else if tokens, ok := validThinkingTokens(int64(budget.Tokens), maxTokens); ok {
+			params.Thinking = anthropic.BetaThinkingConfigParamOfEnabled(tokens)
+			slog.Debug("Anthropic Beta API using thinking_budget", "budget_tokens", tokens)
 		}
-	} else {
-		slog.Debug("Anthropic Beta API: Thinking disabled via /think command")
 	}
 
 	if len(requestTools) > 0 {
@@ -141,13 +116,19 @@ func (c *Client) createBetaStream(
 		"max_tokens", maxTokens,
 		"message_count", len(params.Messages))
 
+	// Forward top_k from provider_opts (Anthropic natively supports it)
+	if topK, ok := providerutil.GetProviderOptInt64(c.ModelConfig.ProviderOpts, "top_k"); ok {
+		params.TopK = param.NewOpt(topK)
+		slog.Debug("Anthropic Beta provider_opts: set top_k", "value", topK)
+	}
+
 	stream := client.Beta.Messages.NewStreaming(ctx, params)
 	trackUsage := c.ModelConfig.TrackUsage == nil || *c.ModelConfig.TrackUsage
 	ad := c.newBetaStreamAdapter(stream, trackUsage)
 
 	// Set up single retry for context length errors
 	ad.retryFn = func() *ssestream.Stream[anthropic.BetaRawMessageStreamEventUnion] {
-		used, err := countAnthropicTokensBeta(ctx, client, anthropic.Model(c.ModelConfig.Model), converted, sys, allTools)
+		used, err := countAnthropicTokensBeta(ctx, client, c.ModelConfig.Model, converted, sys, allTools)
 		if err != nil {
 			slog.Warn("Failed to count tokens for retry, skipping", "error", err)
 			return nil
@@ -297,7 +278,7 @@ func (c *Client) Rerank(ctx context.Context, query string, documents []types.Doc
 		maxTokens = 8192
 	}
 	params := anthropic.BetaMessageNewParams{
-		Model:     anthropic.Model(c.ModelConfig.Model),
+		Model:     c.ModelConfig.Model,
 		MaxTokens: maxTokens,
 		Messages:  msgs,
 		// Enable structured outputs beta.
@@ -317,6 +298,12 @@ func (c *Client) Rerank(ctx context.Context, query string, documents []types.Doc
 	}
 	if c.ModelConfig.TopP != nil {
 		params.TopP = param.NewOpt(*c.ModelConfig.TopP)
+	}
+
+	// Forward top_k from provider_opts (Anthropic natively supports it)
+	if topK, ok := providerutil.GetProviderOptInt64(c.ModelConfig.ProviderOpts, "top_k"); ok {
+		params.TopK = param.NewOpt(topK)
+		slog.Debug("Anthropic Beta provider_opts: set top_k", "value", topK)
 	}
 
 	// Use streaming API to avoid timeout errors for operations that may take longer than 10 minutes
@@ -447,7 +434,7 @@ func accumulateBetaStreamResponse(stream *ssestream.Stream[anthropic.BetaRawMess
 		// Initialize the message metadata from the first event
 		if messageID == "" {
 			messageID = event.Message.ID
-			model = string(event.Message.Model)
+			model = event.Message.Model
 			role = string(event.Message.Role)
 			messageType = string(event.Message.Type)
 		}

@@ -1,0 +1,9 @@
+#!/usr/bin/env docker agent run
+
+agents:
+  root:
+    model: github-copilot/gpt-4o
+    description: A helpful AI assistant powered by GitHub Copilot
+    instruction: |
+      You are a helpful AI assistant.
+      Be helpful, accurate, and concise in your responses.

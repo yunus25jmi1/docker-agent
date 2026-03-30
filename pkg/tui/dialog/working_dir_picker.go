@@ -111,6 +111,7 @@ type tabRegion struct {
 
 type workingDirPickerDialog struct {
 	BaseDialog
+
 	textInput textinput.Model
 	section   dirSection
 

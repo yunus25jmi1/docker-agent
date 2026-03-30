@@ -8,9 +8,9 @@ import (
 	"time"
 
 	"github.com/docker/docker-agent/pkg/agent"
+	"github.com/docker/docker-agent/pkg/backoff"
 	"github.com/docker/docker-agent/pkg/chat"
 	"github.com/docker/docker-agent/pkg/model/provider"
-	"github.com/docker/docker-agent/pkg/model/provider/options"
 	"github.com/docker/docker-agent/pkg/modelerrors"
 	"github.com/docker/docker-agent/pkg/modelsdev"
 	"github.com/docker/docker-agent/pkg/session"
@@ -70,12 +70,12 @@ func logFallbackAttempt(agentName string, model modelWithFallback, attempt, maxR
 }
 
 // logRetryBackoff logs when we're backing off before a retry
-func logRetryBackoff(agentName, modelID string, attempt int, backoff time.Duration) {
+func logRetryBackoff(agentName, modelID string, attempt int, backoffDelay time.Duration) {
 	slog.Debug("Backing off before retry",
 		"agent", agentName,
 		"model", modelID,
 		"attempt", attempt+1,
-		"backoff", backoff)
+		"backoff", backoffDelay)
 }
 
 // getCooldownState returns the current cooldown state for an agent (thread-safe).
@@ -182,14 +182,7 @@ func (r *LocalRuntime) tryModelWithFallback(
 	m *modelsdev.Model,
 	events chan Event,
 ) (streamResult, provider.Provider, error) {
-	// Clone fallback models with the same thinking override as the primary model.
-	// The primary model was already cloned with options.WithThinking(sess.Thinking)
-	// in the main runtime loop, so we apply the same to fallbacks for consistency.
-	rawFallbacks := a.FallbackModels()
-	fallbackModels := make([]provider.Provider, len(rawFallbacks))
-	for i, fb := range rawFallbacks {
-		fallbackModels[i] = provider.CloneWithOptions(ctx, fb, options.WithThinking(sess.Thinking))
-	}
+	fallbackModels := a.FallbackModels()
 
 	fallbackRetries := getEffectiveRetries(a)
 
@@ -230,9 +223,9 @@ func (r *LocalRuntime) tryModelWithFallback(
 
 			// Apply backoff before retry (not on first attempt of each model)
 			if attempt > 0 {
-				backoff := modelerrors.CalculateBackoff(attempt - 1)
-				logRetryBackoff(a.Name(), modelEntry.provider.ID(), attempt, backoff)
-				if !modelerrors.SleepWithContext(ctx, backoff) {
+				backoffDelay := backoff.Calculate(attempt - 1)
+				logRetryBackoff(a.Name(), modelEntry.provider.ID(), attempt, backoffDelay)
+				if !backoff.SleepWithContext(ctx, backoffDelay) {
 					return streamResult{}, nil, ctx.Err()
 				}
 			}
@@ -333,7 +326,7 @@ func (r *LocalRuntime) tryModelWithFallback(
 	if lastErr != nil {
 		wrapped := fmt.Errorf("all models failed: %w", lastErr)
 		if modelerrors.IsContextOverflowError(lastErr) {
-			return streamResult{}, nil, &modelerrors.ContextOverflowError{Underlying: wrapped}
+			return streamResult{}, nil, modelerrors.NewContextOverflowError(wrapped)
 		}
 		return streamResult{}, nil, wrapped
 	}
@@ -390,14 +383,14 @@ func (r *LocalRuntime) handleModelError(
 		// Opt-in enabled, no fallbacks → retry same model after honouring Retry-After (or backoff).
 		waitDuration := retryAfter
 		if waitDuration <= 0 {
-			waitDuration = modelerrors.CalculateBackoff(attempt)
-		} else if waitDuration > modelerrors.MaxRetryAfterWait {
+			waitDuration = backoff.Calculate(attempt)
+		} else if waitDuration > backoff.MaxRetryAfterWait {
 			slog.Warn("Retry-After exceeds maximum, capping",
 				"agent", a.Name(),
 				"model", modelEntry.provider.ID(),
 				"retry_after", retryAfter,
-				"max", modelerrors.MaxRetryAfterWait)
-			waitDuration = modelerrors.MaxRetryAfterWait
+				"max", backoff.MaxRetryAfterWait)
+			waitDuration = backoff.MaxRetryAfterWait
 		}
 		slog.Warn("Rate limited, retrying (opt-in enabled)",
 			"agent", a.Name(),
@@ -406,7 +399,7 @@ func (r *LocalRuntime) handleModelError(
 			"wait", waitDuration,
 			"retry_after_from_header", retryAfter > 0,
 			"error", err)
-		if !modelerrors.SleepWithContext(ctx, waitDuration) {
+		if !backoff.SleepWithContext(ctx, waitDuration) {
 			return retryDecisionReturn
 		}
 		return retryDecisionContinue

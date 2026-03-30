@@ -16,8 +16,6 @@ import (
 	"github.com/docker/docker-agent/pkg/agent"
 	"github.com/docker/docker-agent/pkg/chat"
 	"github.com/docker/docker-agent/pkg/compaction"
-	"github.com/docker/docker-agent/pkg/model/provider"
-	"github.com/docker/docker-agent/pkg/model/provider/options"
 	"github.com/docker/docker-agent/pkg/modelerrors"
 	"github.com/docker/docker-agent/pkg/modelsdev"
 	"github.com/docker/docker-agent/pkg/session"
@@ -113,9 +111,6 @@ func (r *LocalRuntime) RunStream(ctx context.Context, sess *session.Session) <-c
 		// Emit team information
 		events <- TeamInfo(r.agentDetailsFromTeam(), a.Name())
 
-		// Initialize RAG and forward events
-		r.InitializeRAG(ctx, events)
-
 		r.emitAgentWarnings(a, chanSend(events))
 		r.configureToolsetHandlers(a, events)
 
@@ -137,8 +132,6 @@ func (r *LocalRuntime) RunStream(ctx context.Context, sess *session.Session) <-c
 
 		defer r.finalizeEventChannel(ctx, sess, prevElicitationCh, events)
 
-		r.registerDefaultTools()
-
 		iteration := 0
 		// Use a runtime copy of maxIterations so we don't modify the session's persistent config
 		runtimeMaxIterations := sess.MaxIterations
@@ -149,6 +142,13 @@ func (r *LocalRuntime) RunStream(ctx context.Context, sess *session.Session) <-c
 			loopThreshold = 5 // default: always active
 		}
 		loopDetector := newToolLoopDetector(loopThreshold)
+
+		// overflowCompactions counts how many consecutive context-overflow
+		// auto-compactions have been attempted without a successful model
+		// call in between. This prevents an infinite loop when compaction
+		// cannot reduce the context below the model's limit.
+		const maxOverflowCompactions = 1
+		var overflowCompactions int
 
 		// toolModelOverride holds the per-toolset model from the most recent
 		// tool calls. It applies for one LLM turn, then resets.
@@ -256,14 +256,6 @@ func (r *LocalRuntime) RunStream(ctx context.Context, sess *session.Session) <-c
 				toolModelOverride = ""
 			}
 
-			// Apply thinking setting based on session state.
-			// When thinking is disabled: clone with thinking=false to clear any thinking config.
-			// When thinking is enabled: clone with thinking=true to ensure defaults are applied
-			// (this handles models with no thinking config, explicitly disabled thinking, or
-			// models that already have thinking configured).
-			model = provider.CloneWithOptions(ctx, model, options.WithThinking(sess.Thinking))
-			slog.Debug("Cloned provider with thinking setting", "agent", a.Name(), "model", model.ID(), "thinking", sess.Thinking)
-
 			modelID := model.ID()
 
 			// Notify sidebar of the model for this turn. For rule-based
@@ -278,13 +270,14 @@ func (r *LocalRuntime) RunStream(ctx context.Context, sess *session.Session) <-c
 				slog.Debug("Failed to get model definition", "error", err)
 			}
 
+			// We can only compact if we know the limit.
 			var contextLimit int64
 			if m != nil {
 				contextLimit = int64(m.Limit.Context)
-			}
 
-			if m != nil && r.sessionCompaction && compaction.ShouldCompact(sess.InputTokens, sess.OutputTokens, 0, contextLimit) {
-				r.Summarize(ctx, sess, "", events)
+				if r.sessionCompaction && compaction.ShouldCompact(sess.InputTokens, sess.OutputTokens, 0, contextLimit) {
+					r.Summarize(ctx, sess, "", events)
+				}
 			}
 
 			messages := sess.GetMessages(a)
@@ -310,13 +303,18 @@ func (r *LocalRuntime) RunStream(ctx context.Context, sess *session.Session) <-c
 				// Auto-recovery: if the error is a context overflow and
 				// session compaction is enabled, compact the conversation
 				// and retry the request instead of surfacing raw errors.
-				if _, ok := errors.AsType[*modelerrors.ContextOverflowError](err); ok && r.sessionCompaction {
+				// We allow at most maxOverflowCompactions consecutive attempts
+				// to avoid an infinite loop when compaction cannot reduce
+				// the context enough.
+				if _, ok := errors.AsType[*modelerrors.ContextOverflowError](err); ok && r.sessionCompaction && overflowCompactions < maxOverflowCompactions {
+					overflowCompactions++
 					slog.Warn("Context window overflow detected, attempting auto-compaction",
 						"agent", a.Name(),
 						"session_id", sess.ID,
 						"input_tokens", sess.InputTokens,
 						"output_tokens", sess.OutputTokens,
 						"context_limit", contextLimit,
+						"attempt", overflowCompactions,
 					)
 					events <- Warning(
 						"The conversation has exceeded the model's context window. Automatically compacting the conversation history...",
@@ -342,6 +340,9 @@ func (r *LocalRuntime) RunStream(ctx context.Context, sess *session.Session) <-c
 				streamSpan.End()
 				return
 			}
+
+			// A successful model call resets the overflow compaction counter.
+			overflowCompactions = 0
 
 			if usedModel != nil && usedModel.ID() != model.ID() {
 				slog.Info("Used fallback model", "agent", a.Name(), "primary", model.ID(), "used", usedModel.ID())
@@ -382,6 +383,7 @@ func (r *LocalRuntime) RunStream(ctx context.Context, sess *session.Session) <-c
 					loopDetector.consecutive, toolName)
 				events <- Error(errMsg)
 				r.executeNotificationHooks(ctx, a, sess.ID, "error", errMsg)
+				loopDetector.reset()
 				return
 			}
 
@@ -468,6 +470,7 @@ func (r *LocalRuntime) recordAssistantMessage(
 		Usage:             res.Usage,
 		Model:             messageModel,
 		Cost:              messageCost,
+		FinishReason:      res.FinishReason,
 	}
 
 	addAgentMessage(sess, a, &assistantMessage, events)
@@ -478,9 +481,10 @@ func (r *LocalRuntime) recordAssistantMessage(
 		return nil
 	}
 	msgUsage := &MessageUsage{
-		Usage: *res.Usage,
-		Cost:  messageCost,
-		Model: messageModel,
+		Usage:        *res.Usage,
+		Cost:         messageCost,
+		Model:        messageModel,
+		FinishReason: res.FinishReason,
 	}
 	if res.RateLimit != nil {
 		msgUsage.RateLimit = *res.RateLimit
@@ -559,6 +563,11 @@ func (r *LocalRuntime) configureToolsetHandlers(a *agent.Agent, events chan Even
 			func() { events <- Authorization(tools.ElicitationActionAccept, a.Name()) },
 			r.managedOAuth,
 		)
+
+		// Wire RAG event forwarding so the TUI shows indexing progress.
+		if ragTool, ok := tools.As[*builtin.RAGTool](toolset); ok {
+			ragTool.SetEventCallback(ragEventForwarder(ragTool.Name(), r, chanSend(events)))
+		}
 	}
 }
 

@@ -47,9 +47,8 @@ func newAPICmd() *cobra.Command {
 }
 
 func (f *apiFlags) runAPICommand(cmd *cobra.Command, args []string) error {
-	telemetry.TrackCommand("serve", append([]string{"api"}, args...))
-
 	ctx := cmd.Context()
+	telemetry.TrackCommand(ctx, "serve", append([]string{"api"}, args...))
 
 	out := cli.NewPrinter(cmd.OutOrStdout())
 	agentsPath := args[0]

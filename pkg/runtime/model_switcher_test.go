@@ -15,6 +15,7 @@ import (
 // mockCatalogStore implements ModelStore for testing
 type mockCatalogStore struct {
 	ModelStore
+
 	db *modelsdev.Database
 }
 
@@ -244,25 +245,20 @@ func TestBuildCatalogChoices(t *testing.T) {
 	db := &modelsdev.Database{
 		Providers: map[string]modelsdev.Provider{
 			"openai": {
-				ID:   "openai",
-				Name: "OpenAI",
 				Models: map[string]modelsdev.Model{
 					"gpt-4o": {
-						ID:   "gpt-4o",
 						Name: "GPT-4o",
 						Modalities: modelsdev.Modalities{
 							Output: []string{"text"},
 						},
 					},
 					"dall-e-3": {
-						ID:   "dall-e-3",
 						Name: "DALL-E 3",
 						Modalities: modelsdev.Modalities{
 							Output: []string{"image"}, // Not a text model
 						},
 					},
 					"text-embedding-3-large": {
-						ID:     "text-embedding-3-large",
 						Name:   "Text Embedding 3 Large",
 						Family: "text-embedding",
 						Modalities: modelsdev.Modalities{
@@ -272,11 +268,8 @@ func TestBuildCatalogChoices(t *testing.T) {
 				},
 			},
 			"anthropic": {
-				ID:   "anthropic",
-				Name: "Anthropic",
 				Models: map[string]modelsdev.Model{
 					"claude-sonnet-4-0": {
-						ID:   "claude-sonnet-4-0",
 						Name: "Claude Sonnet 4",
 						Modalities: modelsdev.Modalities{
 							Output: []string{"text"},
@@ -285,11 +278,8 @@ func TestBuildCatalogChoices(t *testing.T) {
 				},
 			},
 			"unsupported": {
-				ID:   "unsupported",
-				Name: "Unsupported Provider",
 				Models: map[string]modelsdev.Model{
 					"some-model": {
-						ID:   "some-model",
 						Name: "Some Model",
 						Modalities: modelsdev.Modalities{
 							Output: []string{"text"},
@@ -348,11 +338,8 @@ func TestBuildCatalogChoicesWithDuplicates(t *testing.T) {
 	db := &modelsdev.Database{
 		Providers: map[string]modelsdev.Provider{
 			"openai": {
-				ID:   "openai",
-				Name: "OpenAI",
 				Models: map[string]modelsdev.Model{
 					"gpt-4o": {
-						ID:   "gpt-4o",
 						Name: "GPT-4o",
 						Modalities: modelsdev.Modalities{
 							Output: []string{"text"},

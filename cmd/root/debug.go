@@ -76,7 +76,7 @@ func (f *debugFlags) loadTeam(ctx context.Context, agentFilename string, opts ..
 }
 
 func (f *debugFlags) runDebugConfigCommand(cmd *cobra.Command, args []string) error {
-	telemetry.TrackCommand("debug", append([]string{"config"}, args...))
+	telemetry.TrackCommand(cmd.Context(), "debug", append([]string{"config"}, args...))
 
 	agentSource, err := config.Resolve(args[0], f.runConfig.EnvProvider())
 	if err != nil {
@@ -92,7 +92,7 @@ func (f *debugFlags) runDebugConfigCommand(cmd *cobra.Command, args []string) er
 }
 
 func (f *debugFlags) runDebugToolsetsCommand(cmd *cobra.Command, args []string) error {
-	telemetry.TrackCommand("debug", append([]string{"toolsets"}, args...))
+	telemetry.TrackCommand(cmd.Context(), "debug", append([]string{"toolsets"}, args...))
 
 	ctx := cmd.Context()
 
@@ -132,7 +132,7 @@ func (f *debugFlags) runDebugToolsetsCommand(cmd *cobra.Command, args []string) 
 }
 
 func (f *debugFlags) runDebugTitleCommand(cmd *cobra.Command, args []string) error {
-	telemetry.TrackCommand("debug", append([]string{"title"}, args...))
+	telemetry.TrackCommand(cmd.Context(), "debug", append([]string{"title"}, args...))
 
 	ctx := cmd.Context()
 

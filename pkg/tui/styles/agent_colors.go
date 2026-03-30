@@ -33,6 +33,7 @@ type cachedBadgeStyle struct {
 // precomputed styles for each palette entry.
 var agentRegistry struct {
 	sync.RWMutex
+
 	indices      map[string]int
 	badgeStyles  []cachedBadgeStyle
 	accentStyles []lipgloss.Style

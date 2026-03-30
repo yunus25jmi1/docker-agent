@@ -38,6 +38,7 @@ func WithToolsExcludeFilter(inner tools.ToolSet, toolNames ...string) tools.Tool
 
 type filterTools struct {
 	tools.ToolSet
+
 	toolNames []string
 	exclude   bool
 }

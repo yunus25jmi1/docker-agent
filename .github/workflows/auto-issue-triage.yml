@@ -27,7 +27,7 @@ jobs:
 
     steps:
       - name: Checkout repository
-        uses: actions/checkout@8e8c483db84b4bee98b60c0593521ed34d9990e8
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
           fetch-depth: 1
 
@@ -84,7 +84,7 @@ jobs:
       - name: Run triage agent
         id: agent
         continue-on-error: true
-        uses: docker/cagent-action@latest
+        uses: docker/cagent-action@3a12dbd0c6cd7dda3d4e05f24f0143c9701456de # latest (v1.2.13)
         env:
           GH_TOKEN: ${{ steps.app-token.outputs.token || github.token }}
         with:

@@ -42,6 +42,7 @@ type ToolConfirmationResponse struct {
 
 type toolConfirmationDialog struct {
 	BaseDialog
+
 	msg               *runtime.ToolCallConfirmationEvent
 	keyMap            toolConfirmationKeyMap
 	sessionState      *service.SessionState

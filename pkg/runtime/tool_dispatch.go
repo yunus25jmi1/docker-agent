@@ -284,7 +284,7 @@ func (r *LocalRuntime) executeToolWithHandler(
 		slog.Debug("Tool call completed", "tool", toolCall.Function.Name, "output_length", len(res.Output))
 	}
 
-	events <- ToolCallResponse(toolCall, tool, res, res.Output, a.Name())
+	events <- ToolCallResponse(toolCall.ID, tool, res, res.Output, a.Name())
 
 	// Ensure tool response content is not empty for API compatibility
 	content := res.Output
@@ -439,7 +439,7 @@ func addAgentMessage(sess *session.Session, a *agent.Agent, msg *chat.Message, e
 // addToolErrorResponse adds a tool error response to the session and emits the event.
 // This consolidates the common pattern used by validation, rejection, and cancellation responses.
 func (r *LocalRuntime) addToolErrorResponse(_ context.Context, sess *session.Session, toolCall tools.ToolCall, tool tools.Tool, events chan Event, a *agent.Agent, errorMsg string) {
-	events <- ToolCallResponse(toolCall, tool, tools.ResultError(errorMsg), errorMsg, a.Name())
+	events <- ToolCallResponse(toolCall.ID, tool, tools.ResultError(errorMsg), errorMsg, a.Name())
 
 	toolResponseMsg := chat.Message{
 		Role:       chat.MessageRoleTool,

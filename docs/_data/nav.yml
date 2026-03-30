@@ -126,6 +126,8 @@
   items:
     - title: Tips & Best Practices
       url: /guides/tips/
+    - title: Managing Secrets
+      url: /guides/secrets/
     - title: Go SDK
       url: /guides/go-sdk/
 

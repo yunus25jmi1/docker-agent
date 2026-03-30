@@ -740,9 +740,7 @@ func TestBuildInferenceConfig_DisablesTempTopPWhenThinkingEnabled(t *testing.T) 
 		},
 	}
 
-	cfg := client.buildInferenceConfig()
-
-	// Claude requires temperature=1.0 when thinking is on, so we don't set it
+	cfg := client.buildInferenceConfig(true)
 	assert.Nil(t, cfg.Temperature, "temperature should be nil when thinking is enabled")
 	assert.Nil(t, cfg.TopP, "topP should be nil when thinking is enabled")
 	assert.NotNil(t, cfg.MaxTokens)
@@ -769,7 +767,7 @@ func TestBuildInferenceConfig_SetsTempTopPWhenThinkingNotConfigured(t *testing.T
 		},
 	}
 
-	cfg := client.buildInferenceConfig()
+	cfg := client.buildInferenceConfig(false)
 
 	require.NotNil(t, cfg.Temperature)
 	assert.InDelta(t, 0.7, *cfg.Temperature, 0.01)
@@ -799,7 +797,7 @@ func TestBuildInferenceConfig_SetsTempTopPWhenThinkingBudgetInvalid(t *testing.T
 		},
 	}
 
-	cfg := client.buildInferenceConfig()
+	cfg := client.buildInferenceConfig(false) // thinking not enabled (budget below minimum)
 
 	require.NotNil(t, cfg.Temperature)
 	assert.InDelta(t, 0.7, *cfg.Temperature, 0.01)
@@ -856,7 +854,7 @@ func TestInterleavedThinkingEnabled_NotSet(t *testing.T) {
 		},
 	}
 
-	assert.False(t, client.interleavedThinkingEnabled())
+	assert.True(t, client.interleavedThinkingEnabled())
 }
 
 func TestInterleavedThinkingEnabled_NilProviderOpts(t *testing.T) {
@@ -872,7 +870,7 @@ func TestInterleavedThinkingEnabled_NilProviderOpts(t *testing.T) {
 		},
 	}
 
-	assert.False(t, client.interleavedThinkingEnabled())
+	assert.True(t, client.interleavedThinkingEnabled())
 }
 
 func TestBuildAdditionalModelRequestFields_WithInterleavedThinking(t *testing.T) {

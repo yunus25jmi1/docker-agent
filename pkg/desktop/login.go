@@ -1,6 +1,8 @@
 package desktop
 
-import "context"
+import (
+	"context"
+)
 
 type DockerHubInfo struct {
 	Username string `json:"id"`
@@ -15,6 +17,6 @@ func GetToken(ctx context.Context) string {
 
 func GetUserInfo(ctx context.Context) DockerHubInfo {
 	var info DockerHubInfo
-	_ = ClientBackend.Get(ctx, "/registry/username", &info)
+	_ = ClientBackend.Get(ctx, "/registry/info", &info)
 	return info
 }

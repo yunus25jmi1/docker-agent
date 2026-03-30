@@ -29,41 +29,23 @@ func TestCatalogProviders(t *testing.T) {
 func TestIsCatalogProvider(t *testing.T) {
 	t.Parallel()
 
-	tests := []struct {
-		name     string
-		provider string
-		want     bool
-	}{
-		// Core providers
-		{"openai is core", "openai", true},
-		{"anthropic is core", "anthropic", true},
-		{"google is core", "google", true},
-		{"dmr is core", "dmr", true},
-		{"amazon-bedrock is core", "amazon-bedrock", true},
-
-		// Aliases with BaseURL (should be included)
-		{"mistral has BaseURL", "mistral", true},
-		{"xai has BaseURL", "xai", true},
-		{"nebius has BaseURL", "nebius", true},
-		{"requesty has BaseURL", "requesty", true},
-		{"ollama has BaseURL", "ollama", true},
-		{"minimax has BaseURL", "minimax", true},
-
-		// Aliases without BaseURL (should be excluded)
-		{"azure has no BaseURL", "azure", false},
-
-		// Unknown providers
-		{"unknown provider", "unknown", false},
-		{"cohere not supported", "cohere", false},
+	// All core providers should be catalog providers
+	for _, core := range CoreProviders {
+		assert.True(t, IsCatalogProvider(core), "core provider %s should be a catalog provider", core)
 	}
 
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			t.Parallel()
-			got := IsCatalogProvider(tt.provider)
-			assert.Equal(t, tt.want, got)
-		})
+	// Aliases: catalog if and only if they have a BaseURL
+	for name, alias := range Aliases {
+		if alias.BaseURL != "" {
+			assert.True(t, IsCatalogProvider(name), "alias %s with BaseURL should be a catalog provider", name)
+		} else {
+			assert.False(t, IsCatalogProvider(name), "alias %s without BaseURL should NOT be a catalog provider", name)
+		}
 	}
+
+	// Unknown providers
+	assert.False(t, IsCatalogProvider("unknown"))
+	assert.False(t, IsCatalogProvider("cohere"))
 }
 
 func TestAllProviders(t *testing.T) {

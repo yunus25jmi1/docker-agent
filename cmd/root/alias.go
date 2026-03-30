@@ -112,7 +112,7 @@ func newAliasRemoveCmd() *cobra.Command {
 }
 
 func runAliasAddCommand(cmd *cobra.Command, args []string, flags *aliasAddFlags) error {
-	telemetry.TrackCommand("alias", append([]string{"add"}, args...))
+	telemetry.TrackCommand(cmd.Context(), "alias", append([]string{"add"}, args...))
 
 	out := cli.NewPrinter(cmd.OutOrStdout())
 	name := args[0]
@@ -179,7 +179,7 @@ func runAliasAddCommand(cmd *cobra.Command, args []string, flags *aliasAddFlags)
 }
 
 func runAliasListCommand(cmd *cobra.Command, args []string) error {
-	telemetry.TrackCommand("alias", append([]string{"list"}, args...))
+	telemetry.TrackCommand(cmd.Context(), "alias", append([]string{"list"}, args...))
 
 	out := cli.NewPrinter(cmd.OutOrStdout())
 
@@ -235,7 +235,7 @@ func runAliasListCommand(cmd *cobra.Command, args []string) error {
 }
 
 func runAliasRemoveCommand(cmd *cobra.Command, args []string) error {
-	telemetry.TrackCommand("alias", append([]string{"remove"}, args...))
+	telemetry.TrackCommand(cmd.Context(), "alias", append([]string{"remove"}, args...))
 
 	out := cli.NewPrinter(cmd.OutOrStdout())
 	name := args[0]

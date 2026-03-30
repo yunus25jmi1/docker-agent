@@ -110,13 +110,6 @@ Works for all providers:
 thinking_budget: none # or 0
 ```
 
-<div class="callout callout-info">
-<div class="callout-title">ℹ️ Runtime Toggle
-</div>
-  <p>Even when thinking is disabled in config, you can enable it during a session using the <code>/think</code> command in the TUI.</p>
-
-</div>
-
 ## Interleaved Thinking
 
 For Anthropic and Bedrock Claude models, interleaved thinking allows tool calls during model reasoning. This is enabled by default:

@@ -38,6 +38,7 @@ type vectorStoreDB interface {
 // It contains base document data plus similarity score.
 type VectorSearchResultData struct {
 	database.Document
+
 	Embedding      []float64
 	EmbeddingInput string // Only populated for semantic-embeddings
 	Similarity     float64

@@ -33,6 +33,7 @@ const (
 
 type filePickerDialog struct {
 	BaseDialog
+
 	textInput  textinput.Model
 	currentDir string
 	entries    []fileEntry

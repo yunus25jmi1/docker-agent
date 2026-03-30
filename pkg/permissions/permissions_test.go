@@ -581,3 +581,53 @@ func TestArgToString(t *testing.T) {
 		})
 	}
 }
+
+func TestMerge(t *testing.T) {
+	t.Parallel()
+
+	t.Run("both nil", func(t *testing.T) {
+		t.Parallel()
+		merged := Merge(nil, nil)
+		assert.True(t, merged.IsEmpty())
+	})
+
+	t.Run("one nil", func(t *testing.T) {
+		t.Parallel()
+		c := NewChecker(&latest.PermissionsConfig{Allow: []string{"tool_a"}})
+		merged := Merge(c, nil)
+		assert.Equal(t, []string{"tool_a"}, merged.AllowPatterns())
+	})
+
+	t.Run("combines patterns", func(t *testing.T) {
+		t.Parallel()
+		team := NewChecker(&latest.PermissionsConfig{
+			Allow: []string{"team_tool"},
+			Deny:  []string{"team_deny"},
+		})
+		global := NewChecker(&latest.PermissionsConfig{
+			Allow: []string{"global_tool"},
+			Ask:   []string{"global_ask"},
+		})
+		merged := Merge(team, global)
+		assert.Equal(t, []string{"team_tool", "global_tool"}, merged.AllowPatterns())
+		assert.Equal(t, []string{"team_deny"}, merged.DenyPatterns())
+		assert.Equal(t, []string{"global_ask"}, merged.AskPatterns())
+	})
+
+	t.Run("deny from either source blocks", func(t *testing.T) {
+		t.Parallel()
+		team := NewChecker(&latest.PermissionsConfig{Allow: []string{"tool_a"}})
+		global := NewChecker(&latest.PermissionsConfig{Deny: []string{"tool_a"}})
+		merged := Merge(team, global)
+		// Deny is checked first, so global deny overrides team allow
+		assert.Equal(t, Deny, merged.Check("tool_a"))
+	})
+
+	t.Run("skips empty checkers", func(t *testing.T) {
+		t.Parallel()
+		empty := NewChecker(&latest.PermissionsConfig{})
+		actual := NewChecker(&latest.PermissionsConfig{Deny: []string{"bad"}})
+		merged := Merge(empty, nil, actual, empty)
+		assert.Equal(t, []string{"bad"}, merged.DenyPatterns())
+	})
+}

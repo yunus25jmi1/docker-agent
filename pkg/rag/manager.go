@@ -574,12 +574,25 @@ func (m *Manager) readFile(path string) (string, error) {
 	return string(data), nil
 }
 
-// GetAbsolutePaths converts doc paths to absolute paths
+// GetAbsolutePaths converts doc paths to absolute paths relative to basePath.
+// If basePath is empty (e.g. for OCI/URL sources), relative paths are resolved
+// against the current working directory.
 func GetAbsolutePaths(basePath string, docPaths []string) []string {
 	var absPaths []string
 	for _, p := range docPaths {
 		if filepath.IsAbs(p) {
 			absPaths = append(absPaths, p)
+			continue
+		}
+		if basePath == "" {
+			slog.Debug("Resolving relative path with empty basePath, using working directory", "path", p)
+			abs, err := filepath.Abs(p)
+			if err != nil {
+				slog.Warn("Failed to resolve absolute path, using as-is", "path", p, "error", err)
+				absPaths = append(absPaths, p)
+			} else {
+				absPaths = append(absPaths, abs)
+			}
 		} else {
 			absPaths = append(absPaths, filepath.Join(basePath, p))
 		}

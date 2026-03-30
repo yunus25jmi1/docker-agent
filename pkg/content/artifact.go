@@ -19,6 +19,7 @@ import (
 // See https://github.com/opencontainers/image-spec/blob/v1.1.1/manifest.md#guidelines-for-artifact-usage
 type artifactImage struct {
 	v1.Image
+
 	artifactType string
 }
 

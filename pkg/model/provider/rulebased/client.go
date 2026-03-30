@@ -41,6 +41,7 @@ type ProviderFactory func(ctx context.Context, modelSpec string, models map[stri
 // Client implements the Provider interface for rule-based model routing.
 type Client struct {
 	base.Config
+
 	routes         []Provider
 	fallback       Provider
 	index          bleve.Index

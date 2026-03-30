@@ -111,7 +111,7 @@ func RegisterClient(ctx context.Context, authMetadata *AuthorizationServerMetada
 
 	reqBody := map[string]any{
 		"redirect_uris": []string{redirectURI},
-		"client_name":   "cagent",
+		"client_name":   "docker-agent",
 		"grant_types":   []string{"authorization_code"},
 		"response_types": []string{
 			"code",

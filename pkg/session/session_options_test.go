@@ -25,14 +25,12 @@ func TestNewSession_AllOptionsApplied(t *testing.T) {
 		WithMaxIterations(10),
 		WithToolsApproved(true),
 		WithHideToolResults(true),
-		WithThinking(true),
 		WithWorkingDir("/work"),
 	)
 
 	assert.Equal(t, 10, s.MaxIterations)
 	assert.True(t, s.ToolsApproved)
 	assert.True(t, s.HideToolResults)
-	assert.True(t, s.Thinking)
 	assert.Equal(t, "/work", s.WorkingDir)
 	assert.Equal(t, []string{"/work"}, s.AllowedDirectories())
 }
@@ -45,7 +43,6 @@ func TestNewSession_ConsistencyBetweenInitialAndSpawned(t *testing.T) {
 	workingDir := "/projects/app"
 	autoApprove := true
 	hideToolResults := true
-	thinking := true
 	maxIterations := 25
 
 	// Simulate what createLocalRuntimeAndSession builds (initial session).
@@ -53,7 +50,6 @@ func TestNewSession_ConsistencyBetweenInitialAndSpawned(t *testing.T) {
 		WithMaxIterations(maxIterations),
 		WithToolsApproved(autoApprove),
 		WithHideToolResults(hideToolResults),
-		WithThinking(thinking),
 		WithWorkingDir(workingDir),
 	)
 
@@ -62,14 +58,12 @@ func TestNewSession_ConsistencyBetweenInitialAndSpawned(t *testing.T) {
 		WithMaxIterations(maxIterations),
 		WithToolsApproved(autoApprove),
 		WithHideToolResults(hideToolResults),
-		WithThinking(thinking),
 		WithWorkingDir(workingDir),
 	)
 
 	assert.Equal(t, initial.MaxIterations, spawned.MaxIterations)
 	assert.Equal(t, initial.ToolsApproved, spawned.ToolsApproved)
 	assert.Equal(t, initial.HideToolResults, spawned.HideToolResults)
-	assert.Equal(t, initial.Thinking, spawned.Thinking)
 	assert.Equal(t, initial.WorkingDir, spawned.WorkingDir)
 	assert.Equal(t, initial.AllowedDirectories(), spawned.AllowedDirectories())
 }

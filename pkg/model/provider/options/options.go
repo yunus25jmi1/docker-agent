@@ -8,9 +8,9 @@ type ModelOptions struct {
 	gateway          string
 	structuredOutput *latest.StructuredOutput
 	generatingTitle  bool
+	noThinking       bool
 	maxTokens        int64
 	providers        map[string]latest.ProviderConfig
-	thinking         *bool
 }
 
 func (c *ModelOptions) Gateway() string {
@@ -29,12 +29,12 @@ func (c *ModelOptions) MaxTokens() int64 {
 	return c.maxTokens
 }
 
-func (c *ModelOptions) Providers() map[string]latest.ProviderConfig {
-	return c.providers
+func (c *ModelOptions) NoThinking() bool {
+	return c.noThinking
 }
 
-func (c *ModelOptions) Thinking() *bool {
-	return c.thinking
+func (c *ModelOptions) Providers() map[string]latest.ProviderConfig {
+	return c.providers
 }
 
 type Opt func(*ModelOptions)
@@ -63,15 +63,15 @@ func WithMaxTokens(maxTokens int64) Opt {
 	}
 }
 
-func WithProviders(providers map[string]latest.ProviderConfig) Opt {
+func WithNoThinking() Opt {
 	return func(cfg *ModelOptions) {
-		cfg.providers = providers
+		cfg.noThinking = true
 	}
 }
 
-func WithThinking(enabled bool) Opt {
+func WithProviders(providers map[string]latest.ProviderConfig) Opt {
 	return func(cfg *ModelOptions) {
-		cfg.thinking = &enabled
+		cfg.providers = providers
 	}
 }
 
@@ -88,14 +88,14 @@ func FromModelOptions(m ModelOptions) []Opt {
 	if m.generatingTitle {
 		out = append(out, WithGeneratingTitle())
 	}
+	if m.noThinking {
+		out = append(out, WithNoThinking())
+	}
 	if m.maxTokens != 0 {
 		out = append(out, WithMaxTokens(m.maxTokens))
 	}
 	if len(m.providers) > 0 {
 		out = append(out, WithProviders(m.providers))
-	}
-	if m.thinking != nil {
-		out = append(out, WithThinking(*m.thinking))
 	}
 	return out
 }

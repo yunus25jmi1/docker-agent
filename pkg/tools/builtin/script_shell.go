@@ -116,6 +116,7 @@ func (t *ScriptShellTool) Tools(context.Context) ([]tools.Tool, error) {
 
 		toolsList = append(toolsList, tools.Tool{
 			Name:         toolName,
+			Category:     "shell",
 			Description:  description,
 			Parameters:   inputSchema,
 			OutputSchema: tools.MustSchemaFor[string](),
@@ -144,7 +145,7 @@ func (t *ScriptShellTool) execute(ctx context.Context, toolConfig *latest.Script
 	cmd.Env = t.env
 	for key, value := range params {
 		if value != nil {
-			cmd.Env = append(cmd.Env, fmt.Sprintf("%s=%s", key, value))
+			cmd.Env = append(cmd.Env, fmt.Sprintf("%s=%v", key, value))
 		}
 	}
 

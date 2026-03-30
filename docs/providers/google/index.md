@@ -89,3 +89,25 @@ models:
     model: gemini-3-flash
     thinking_budget: medium # default for Flash: minimal | low | medium | high
 ```
+
+## Built-in Tools (Grounding)
+
+Gemini models support built-in tools that let the model access Google Search and Google Maps
+directly during generation. Enable them via `provider_opts`:
+
+```yaml
+models:
+  gemini-grounded:
+    provider: google
+    model: gemini-2.5-flash
+    provider_opts:
+      google_search: true
+      google_maps: true
+      code_execution: true
+```
+
+| Option           | Description                                          |
+| ---------------- | ---------------------------------------------------- |
+| `google_search`  | Enables Google Search grounding for up-to-date info  |
+| `google_maps`    | Enables Google Maps grounding for location queries   |
+| `code_execution` | Enables server-side code execution for computations  |

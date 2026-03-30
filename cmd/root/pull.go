@@ -35,9 +35,9 @@ func newPullCmd() *cobra.Command {
 }
 
 func (f *pullFlags) runPullCommand(cmd *cobra.Command, args []string) error {
-	telemetry.TrackCommand("share", append([]string{"pull"}, args...))
-
 	ctx := cmd.Context()
+	telemetry.TrackCommand(ctx, "share", append([]string{"pull"}, args...))
+
 	out := cli.NewPrinter(cmd.OutOrStdout())
 	registryRef := args[0]
 	slog.Debug("Starting pull", "registry_ref", registryRef)

@@ -1,6 +1,7 @@
 package teamloader
 
 import (
+	"cmp"
 	"context"
 	"errors"
 	"fmt"
@@ -16,6 +17,7 @@ import (
 	"github.com/docker/docker-agent/pkg/memory/database/sqlite"
 	"github.com/docker/docker-agent/pkg/path"
 	"github.com/docker/docker-agent/pkg/paths"
+	"github.com/docker/docker-agent/pkg/rag"
 	"github.com/docker/docker-agent/pkg/toolinstall"
 	"github.com/docker/docker-agent/pkg/tools"
 	"github.com/docker/docker-agent/pkg/tools/a2a"
@@ -79,6 +81,7 @@ func NewDefaultToolsetRegistry() *ToolsetRegistry {
 	r.Register("openapi", createOpenAPITool)
 	r.Register("model_picker", createModelPickerTool)
 	r.Register("background_agents", createBackgroundAgentsTool)
+	r.Register("rag", createRAGTool)
 	return r
 }
 
@@ -373,4 +376,24 @@ func createModelPickerTool(_ context.Context, toolset latest.Toolset, _ string, 
 
 func createBackgroundAgentsTool(_ context.Context, _ latest.Toolset, _ string, _ *config.RuntimeConfig, _ string) (tools.ToolSet, error) {
 	return agenttool.NewToolSet(), nil
+}
+
+func createRAGTool(ctx context.Context, toolset latest.Toolset, parentDir string, runConfig *config.RuntimeConfig, _ string) (tools.ToolSet, error) {
+	if toolset.RAGConfig == nil {
+		return nil, errors.New("rag toolset requires rag_config (should have been resolved from ref)")
+	}
+
+	ragName := cmp.Or(toolset.Name, "rag")
+
+	mgr, err := rag.NewManager(ctx, ragName, toolset.RAGConfig, rag.ManagersBuildConfig{
+		ParentDir:     parentDir,
+		ModelsGateway: runConfig.ModelsGateway,
+		Env:           runConfig.EnvProvider(),
+	})
+	if err != nil {
+		return nil, fmt.Errorf("failed to create RAG manager: %w", err)
+	}
+
+	toolName := cmp.Or(mgr.ToolName(), ragName)
+	return builtin.NewRAGTool(mgr, toolName), nil
 }

@@ -31,6 +31,7 @@ type ThemeChoice struct {
 // themePickerDialog is a dialog for selecting a theme.
 type themePickerDialog struct {
 	BaseDialog
+
 	textInput  textinput.Model
 	themes     []ThemeChoice
 	filtered   []ThemeChoice

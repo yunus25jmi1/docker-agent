@@ -1,6 +1,7 @@
 package skills
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -11,6 +12,7 @@ import (
 	"time"
 
 	"github.com/docker/docker-agent/pkg/paths"
+	"github.com/docker/docker-agent/pkg/remote"
 )
 
 // remoteIndex represents the index.json served at /.well-known/skills/index.json
@@ -24,10 +26,6 @@ type remoteSkillEntry struct {
 	Files       []string `json:"files"`
 }
 
-var defaultHTTPClient = &http.Client{
-	Timeout: 30 * time.Second,
-}
-
 func defaultCache() *diskCache {
 	return newDiskCache(filepath.Join(paths.GetCacheDir(), "skills"))
 }
@@ -37,16 +35,20 @@ func defaultCache() *diskCache {
 // into a disk cache so the agent can read them without network requests during
 // task execution.
 func loadRemoteSkills(baseURL string) []Skill {
-	return loadRemoteSkillsWithCache(baseURL, defaultCache())
+	return loadRemoteSkillsWithCache(context.Background(), baseURL, defaultCache())
 }
 
-func loadRemoteSkillsWithCache(baseURL string, cache *diskCache) []Skill {
+func loadRemoteSkillsWithCache(ctx context.Context, baseURL string, cache *diskCache) []Skill {
 	baseURL = strings.TrimRight(baseURL, "/")
 	indexURL := baseURL + "/.well-known/skills/index.json"
 
 	slog.Debug("Fetching remote skills index", "url", indexURL)
 
-	resp, err := defaultHTTPClient.Get(indexURL)
+	httpClient := &http.Client{
+		Timeout:   30 * time.Second,
+		Transport: remote.NewTransport(ctx),
+	}
+	resp, err := httpClient.Get(indexURL)
 	if err != nil {
 		slog.Warn("Failed to fetch remote skills index", "url", indexURL, "error", err)
 		return nil
@@ -77,7 +79,7 @@ func loadRemoteSkillsWithCache(baseURL string, cache *diskCache) []Skill {
 		}
 
 		cacheDir := cache.cacheDir(baseURL, entry.Name)
-		prefetchFiles(cache, baseURL, entry.Name, entry.Files)
+		prefetchFiles(ctx, cache, baseURL, entry.Name, entry.Files)
 
 		skill := Skill{
 			Name:        entry.Name,
@@ -96,7 +98,7 @@ func loadRemoteSkillsWithCache(baseURL string, cache *diskCache) []Skill {
 // prefetchFiles downloads all files listed in the index for a skill,
 // storing them in the disk cache. Files already in cache (and not expired)
 // are skipped.
-func prefetchFiles(cache *diskCache, baseURL, skillName string, files []string) {
+func prefetchFiles(ctx context.Context, cache *diskCache, baseURL, skillName string, files []string) {
 	for _, file := range files {
 		if !isValidFilePath(file) {
 			slog.Debug("Skipping invalid file path in skill", "skill", skillName, "file", file)
@@ -108,7 +110,7 @@ func prefetchFiles(cache *diskCache, baseURL, skillName string, files []string) 
 		}
 
 		fileURL := fmt.Sprintf("%s/.well-known/skills/%s/%s", baseURL, skillName, file)
-		if _, err := cache.FetchAndStore(baseURL, skillName, file, fileURL); err != nil {
+		if _, err := cache.FetchAndStore(ctx, baseURL, skillName, file, fileURL); err != nil {
 			slog.Warn("Failed to prefetch skill file", "skill", skillName, "file", file, "error", err)
 		}
 	}

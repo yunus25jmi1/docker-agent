@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/docker/docker-agent/pkg/paths"
+	"github.com/docker/docker-agent/pkg/remote"
 )
 
 const (
@@ -166,10 +167,6 @@ func saveToDisk(path string, catalog Catalog, etag string) {
 	}
 }
 
-// catalogClient is a dedicated HTTP client for catalog fetches, isolated from
-// http.DefaultClient so that other parts of the process cannot interfere.
-var catalogClient = &http.Client{}
-
 // fetchFromNetwork fetches the catalog, using the ETag for conditional requests.
 // It returns (nil, "", nil) when the server responds with 304 Not Modified.
 func fetchFromNetwork(ctx context.Context, etag string) (Catalog, string, error) {
@@ -185,6 +182,7 @@ func fetchFromNetwork(ctx context.Context, etag string) (Catalog, string, error)
 		req.Header.Set("If-None-Match", etag)
 	}
 
+	catalogClient := &http.Client{Transport: remote.NewTransport(ctx)}
 	resp, err := catalogClient.Do(req)
 	if err != nil {
 		return nil, "", err

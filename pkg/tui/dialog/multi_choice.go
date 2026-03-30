@@ -98,6 +98,7 @@ type clickableRange struct {
 // multiChoiceDialog implements a reusable multi-choice selection dialog.
 type multiChoiceDialog struct {
 	BaseDialog
+
 	config            MultiChoiceConfig
 	selected          selection       // Currently selected item (-1 = none)
 	customInput       textinput.Model // Text input for custom response

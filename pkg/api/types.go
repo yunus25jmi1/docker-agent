@@ -131,7 +131,6 @@ type SessionResponse struct {
 	Messages      []session.Message          `json:"messages,omitempty"`
 	CreatedAt     time.Time                  `json:"created_at"`
 	ToolsApproved bool                       `json:"tools_approved"`
-	Thinking      bool                       `json:"thinking"`
 	InputTokens   int64                      `json:"input_tokens"`
 	OutputTokens  int64                      `json:"output_tokens"`
 	WorkingDir    string                     `json:"working_dir,omitempty"`

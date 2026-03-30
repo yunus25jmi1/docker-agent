@@ -1,4 +1,3 @@
-// Package messages defines all TUI message types organized by domain.
 package messages
 
 import tea "charm.land/bubbletea/v2"

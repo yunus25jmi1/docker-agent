@@ -24,64 +24,58 @@ type ManagersBuildConfig struct {
 	Models        map[string]latest.ModelConfig // Model configurations from config
 }
 
-// NewManagers constructs all RAG managers defined in the config.
-func NewManagers(
+// NewManager constructs a single RAG manager from a RAGConfig.
+func NewManager(
 	ctx context.Context,
-	cfg *latest.Config,
+	ragName string,
+	ragCfg *latest.RAGConfig,
 	buildCfg ManagersBuildConfig,
-) (map[string]*Manager, error) {
-	managers := make(map[string]*Manager)
-
-	if len(cfg.RAG) == 0 {
-		return managers, nil
+) (*Manager, error) {
+	if ragCfg == nil {
+		return nil, fmt.Errorf("nil RAG config for %q", ragName)
 	}
 
-	for ragName, ragCfg := range cfg.RAG {
-		// Validate that we have at least one strategy
-		if len(ragCfg.Strategies) == 0 {
-			return nil, fmt.Errorf("no strategies configured for RAG %q", ragName)
-		}
-
-		// Build context for strategy builders
-		strategyBuildCtx := strategy.BuildContext{
-			RAGName:       ragName,
-			ParentDir:     buildCfg.ParentDir,
-			SharedDocs:    GetAbsolutePaths(buildCfg.ParentDir, ragCfg.Docs),
-			Models:        buildCfg.Models,
-			Env:           buildCfg.Env,
-			ModelsGateway: buildCfg.ModelsGateway,
-			RespectVCS:    ragCfg.GetRespectVCS(),
-		}
-
-		strategyConfigs, strategyEvents, err := buildStrategyConfigs(ctx, ragCfg, strategyBuildCtx, ragName)
-		if err != nil {
-			return nil, fmt.Errorf("failed to build strategy configs for RAG %q: %w", ragName, err)
-		}
-
-		managerCfg, err := buildManagerConfig(ctx, ragCfg, buildCfg, strategyConfigs)
-		if err != nil {
-			return nil, fmt.Errorf("failed to build manager config for RAG %q: %w", ragName, err)
-		}
-
-		// The strategyEvents channel is so the manager can convert strategy events to RAG events.
-		manager, err := New(ctx, ragName, managerCfg, strategyEvents)
-		if err != nil {
-			return nil, fmt.Errorf("failed to create RAG manager %q: %w", ragName, err)
-		}
-
-		managers[ragName] = manager
-
-		strategyNames := make([]string, len(strategyConfigs))
-		for i, sc := range strategyConfigs {
-			strategyNames[i] = sc.Name
-		}
-		slog.Debug("Created RAG manager",
-			"name", ragName,
-			"strategies", strategyNames,
-			"docs", len(managerCfg.Docs))
+	// Validate that we have at least one strategy
+	if len(ragCfg.Strategies) == 0 {
+		return nil, fmt.Errorf("no strategies configured for RAG %q", ragName)
 	}
 
-	return managers, nil
+	// Build context for strategy builders
+	strategyBuildCtx := strategy.BuildContext{
+		RAGName:       ragName,
+		ParentDir:     buildCfg.ParentDir,
+		SharedDocs:    GetAbsolutePaths(buildCfg.ParentDir, ragCfg.Docs),
+		Models:        buildCfg.Models,
+		Env:           buildCfg.Env,
+		ModelsGateway: buildCfg.ModelsGateway,
+		RespectVCS:    ragCfg.GetRespectVCS(),
+	}
+
+	strategyConfigs, strategyEvents, err := buildStrategyConfigs(ctx, *ragCfg, strategyBuildCtx, ragName)
+	if err != nil {
+		return nil, fmt.Errorf("failed to build strategy configs for RAG %q: %w", ragName, err)
+	}
+
+	managerCfg, err := buildManagerConfig(ctx, *ragCfg, buildCfg, strategyConfigs)
+	if err != nil {
+		return nil, fmt.Errorf("failed to build manager config for RAG %q: %w", ragName, err)
+	}
+
+	manager, err := New(ctx, ragName, managerCfg, strategyEvents)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create RAG manager %q: %w", ragName, err)
+	}
+
+	strategyNames := make([]string, len(strategyConfigs))
+	for i, sc := range strategyConfigs {
+		strategyNames[i] = sc.Name
+	}
+	slog.Debug("Created RAG manager",
+		"name", ragName,
+		"strategies", strategyNames,
+		"docs", len(managerCfg.Docs))
+
+	return manager, nil
 }
 
 // buildManagerConfig constructs a rag.Manager Config from the configuration and strategies.

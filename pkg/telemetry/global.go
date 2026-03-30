@@ -7,12 +7,11 @@ import (
 )
 
 // TrackCommand records a command event using automatic telemetry initialization
-func TrackCommand(action string, args []string) {
+func TrackCommand(ctx context.Context, action string, args []string) {
 	// Automatically initialize telemetry if not already done
-	EnsureGlobalTelemetryInitialized()
+	EnsureGlobalTelemetryInitialized(ctx)
 
 	if globalToolTelemetryClient != nil {
-		ctx := context.Background()
 		commandEvent := CommandEvent{
 			Action:  action,
 			Args:    args,
@@ -32,8 +31,8 @@ var (
 )
 
 // GetGlobalTelemetryClient returns the global telemetry client for adding to context
-func GetGlobalTelemetryClient() *Client {
-	EnsureGlobalTelemetryInitialized()
+func GetGlobalTelemetryClient(ctx context.Context) *Client {
+	EnsureGlobalTelemetryInitialized(ctx)
 	return globalToolTelemetryClient
 }
 
@@ -61,7 +60,7 @@ func SetGlobalTelemetryDebugMode(debug bool) {
 
 // EnsureGlobalTelemetryInitialized ensures telemetry is initialized exactly once
 // This handles all the setup automatically - no explicit initialization needed
-func EnsureGlobalTelemetryInitialized() {
+func EnsureGlobalTelemetryInitialized(ctx context.Context) {
 	globalTelemetryOnce.Do(func() {
 		// Read global settings under the lock
 		globalMu.RLock()
@@ -75,7 +74,7 @@ func EnsureGlobalTelemetryInitialized() {
 		// Get telemetry enabled setting
 		enabled := GetTelemetryEnabled()
 
-		client := newClient(logger, enabled, debugMode, version)
+		client := newClient(ctx, logger, enabled, debugMode, version)
 
 		globalToolTelemetryClient = client
 

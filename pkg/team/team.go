@@ -4,18 +4,15 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"log/slog"
 	"strings"
 
 	"github.com/docker/docker-agent/pkg/agent"
 	"github.com/docker/docker-agent/pkg/config/types"
 	"github.com/docker/docker-agent/pkg/permissions"
-	"github.com/docker/docker-agent/pkg/rag"
 )
 
 type Team struct {
 	agents      []*agent.Agent
-	ragManagers map[string]*rag.Manager
 	permissions *permissions.Checker
 }
 
@@ -27,12 +24,6 @@ func WithAgents(agents ...*agent.Agent) Opt {
 	}
 }
 
-func WithRAGManagers(managers map[string]*rag.Manager) Opt {
-	return func(t *Team) {
-		t.ragManagers = managers
-	}
-}
-
 func WithPermissions(checker *permissions.Checker) Opt {
 	return func(t *Team) {
 		t.permissions = checker
@@ -40,9 +31,7 @@ func WithPermissions(checker *permissions.Checker) Opt {
 }
 
 func New(opts ...Opt) *Team {
-	t := &Team{
-		ragManagers: make(map[string]*rag.Manager),
-	}
+	t := &Team{}
 	for _, opt := range opts {
 		opt(t)
 	}
@@ -129,48 +118,19 @@ func (t *Team) StopToolSets(ctx context.Context) error {
 			return fmt.Errorf("failed to stop tool sets: %w", err)
 		}
 	}
-	for name, mgr := range t.ragManagers {
-		if err := mgr.Close(); err != nil {
-			slog.Error("Failed to close RAG manager", "name", name, "error", err)
-		}
-	}
 
 	return nil
-}
-
-// RAGManagers returns the RAG managers for this team
-func (t *Team) RAGManagers() map[string]*rag.Manager {
-	return t.ragManagers
-}
-
-// InitializeRAG initializes all RAG managers in the background
-func (t *Team) InitializeRAG(ctx context.Context) {
-	for _, mgr := range t.ragManagers {
-		go func(m *rag.Manager) {
-			slog.Debug("Starting RAG manager initialization goroutine", "rag", m.Name())
-			if err := m.Initialize(ctx); err != nil {
-				slog.Error("Failed to initialize RAG manager", "rag", m.Name(), "error", err)
-			} else {
-				slog.Info("RAG manager initialized successfully", "rag", m.Name())
-			}
-		}(mgr)
-	}
-}
-
-// StartRAGFileWatchers starts file watchers for all RAG managers
-func (t *Team) StartRAGFileWatchers(ctx context.Context) {
-	for _, mgr := range t.ragManagers {
-		go func(m *rag.Manager) {
-			slog.Debug("Starting RAG file watcher goroutine", "rag", m.Name())
-			if err := m.StartFileWatcher(ctx); err != nil {
-				slog.Error("Failed to start RAG file watcher", "rag", m.Name(), "error", err)
-			}
-		}(mgr)
-	}
 }
 
 // Permissions returns the permission checker for this team.
 // Returns nil if no permissions are configured.
 func (t *Team) Permissions() *permissions.Checker {
 	return t.permissions
+}
+
+// SetPermissions replaces the team's permission checker.
+// This is used to merge additional permission sources (e.g. user-level global
+// permissions) into the team's checker after construction.
+func (t *Team) SetPermissions(checker *permissions.Checker) {
+	t.permissions = checker
 }

@@ -82,7 +82,6 @@ func copySessionMetadata(dst, src *Session, title string) {
 	}
 	dst.Title = title
 	dst.ToolsApproved = src.ToolsApproved
-	dst.Thinking = src.Thinking
 	dst.HideToolResults = src.HideToolResults
 	dst.WorkingDir = src.WorkingDir
 	dst.SendUserMessage = src.SendUserMessage

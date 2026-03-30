@@ -13,15 +13,19 @@ import (
 	"github.com/docker/docker-agent/pkg/tools"
 )
 
-// ResponseStreamAdapter adapts the OpenAI responses stream to our interface
+// Compile-time check: ssestream.Stream satisfies responseEventStream.
+var _ responseEventStream = (*ssestream.Stream[responses.ResponseStreamEventUnion])(nil)
+
+// ResponseStreamAdapter adapts the OpenAI responses stream to our interface.
+// It works with any responseEventStream implementation (SSE or WebSocket).
 type ResponseStreamAdapter struct {
-	stream         *ssestream.Stream[responses.ResponseStreamEventUnion]
+	stream         responseEventStream
 	trackUsage     bool
 	itemCallIDMap  map[string]string
 	itemHasContent map[string]bool
 }
 
-func newResponseStreamAdapter(stream *ssestream.Stream[responses.ResponseStreamEventUnion], trackUsage bool) *ResponseStreamAdapter {
+func newResponseStreamAdapter(stream responseEventStream, trackUsage bool) *ResponseStreamAdapter {
 	return &ResponseStreamAdapter{
 		stream:         stream,
 		trackUsage:     trackUsage,
@@ -254,5 +258,5 @@ func (a *ResponseStreamAdapter) Recv() (chat.MessageStreamResponse, error) {
 
 // Close closes the stream
 func (a *ResponseStreamAdapter) Close() {
-	a.stream.Close()
+	_ = a.stream.Close()
 }

@@ -9,28 +9,12 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
-	"math/rand"
 	"net"
 	"net/http"
 	"regexp"
 	"strconv"
 	"strings"
 	"time"
-
-	"github.com/anthropics/anthropic-sdk-go"
-	"google.golang.org/genai"
-)
-
-// Backoff and retry-after configuration constants.
-const (
-	backoffBaseDelay = 200 * time.Millisecond
-	backoffMaxDelay  = 2 * time.Second
-	backoffFactor    = 2.0
-	backoffJitter    = 0.1
-
-	// MaxRetryAfterWait caps how long we'll honor a Retry-After header to prevent
-	// a misbehaving server from blocking the agent for an unreasonable amount of time.
-	MaxRetryAfterWait = 60 * time.Second
 )
 
 // StatusError wraps an HTTP API error with structured metadata for retry decisions.
@@ -46,7 +30,7 @@ type StatusError struct {
 }
 
 func (e *StatusError) Error() string {
-	return e.Err.Error()
+	return fmt.Sprintf("HTTP %d: %s", e.StatusCode, e.Err.Error())
 }
 
 func (e *StatusError) Unwrap() error {
@@ -62,7 +46,7 @@ func WrapHTTPError(statusCode int, resp *http.Response, err error) error {
 	}
 	var retryAfter time.Duration
 	if resp != nil {
-		retryAfter = ParseRetryAfterHeader(resp.Header.Get("Retry-After"))
+		retryAfter = parseRetryAfterHeader(resp.Header.Get("Retry-After"))
 	}
 	return &StatusError{
 		StatusCode: statusCode,
@@ -89,6 +73,13 @@ const (
 // surfacing raw HTTP errors to the user.
 type ContextOverflowError struct {
 	Underlying error
+}
+
+// NewContextOverflowError creates a ContextOverflowError wrapping the given
+// underlying error. Use this constructor rather than building the struct
+// directly so that future field additions don't break callers.
+func NewContextOverflowError(underlying error) *ContextOverflowError {
+	return &ContextOverflowError{Underlying: underlying}
 }
 
 func (e *ContextOverflowError) Error() string {
@@ -161,32 +152,29 @@ func IsContextOverflowError(err error) bool {
 // statusCodeRegex matches HTTP status codes in error messages (e.g., "429", "500", ": 429 ")
 var statusCodeRegex = regexp.MustCompile(`\b([45]\d{2})\b`)
 
-// ExtractHTTPStatusCode attempts to extract an HTTP status code from the error.
-// Checks in order:
-// 1. Known provider SDK error types (Anthropic, Gemini)
-// 2. Regex parsing of error message (fallback for OpenAI and others)
+// extractHTTPStatusCode attempts to extract an HTTP status code from the error
+// using regex parsing of the error message. This is a fallback for providers
+// whose errors are not yet wrapped in *StatusError (the preferred path).
+//
+// The regex matches 4xx/5xx codes at word boundaries
+// (e.g., "429 Too Many Requests", "500 Internal Server Error").
 // Returns 0 if no status code found.
-func ExtractHTTPStatusCode(err error) int {
+func extractHTTPStatusCode(err error) int {
 	if err == nil {
 		return 0
 	}
 
-	// Check Anthropic SDK error type (public)
-	if anthropicErr, ok := errors.AsType[*anthropic.Error](err); ok {
-		return anthropicErr.StatusCode
+	// Check for *StatusError first (preferred structured path).
+	var statusErr *StatusError
+	if errors.As(err, &statusErr) {
+		return statusErr.StatusCode
 	}
 
-	// Check Google Gemini SDK error type (public)
-	if geminiErr, ok := errors.AsType[*genai.APIError](err); ok {
-		return geminiErr.Code
-	}
-
-	// For other providers (OpenAI, etc.), extract from error message using regex
+	// Fallback: extract from error message using regex.
 	// OpenAI SDK error format: `POST "/v1/...": 429 Too Many Requests {...}`
 	matches := statusCodeRegex.FindStringSubmatch(err.Error())
 	if len(matches) >= 2 {
-		var code int
-		if _, err := fmt.Sscanf(matches[1], "%d", &code); err == nil {
+		if code, err := strconv.Atoi(matches[1]); err == nil {
 			return code
 		}
 	}
@@ -194,7 +182,7 @@ func ExtractHTTPStatusCode(err error) int {
 	return 0
 }
 
-// IsRetryableStatusCode determines if an HTTP status code is retryable.
+// isRetryableStatusCode determines if an HTTP status code is retryable.
 // Retryable means we should retry the SAME model with exponential backoff.
 //
 // Retryable status codes:
@@ -205,7 +193,7 @@ func ExtractHTTPStatusCode(err error) int {
 // Non-retryable status codes (skip to next model immediately):
 // - 429 (rate limit) - provider is explicitly telling us to back off
 // - 4xx client errors (400, 401, 403, 404) - won't get better with retry
-func IsRetryableStatusCode(statusCode int) bool {
+func isRetryableStatusCode(statusCode int) bool {
 	switch statusCode {
 	case 500, 502, 503, 504: // Server errors
 		return true
@@ -220,7 +208,45 @@ func IsRetryableStatusCode(statusCode int) bool {
 	}
 }
 
-// IsRetryableModelError determines if an error should trigger a retry of the SAME model.
+// retryablePatterns contains error message substrings that indicate a
+// transient/retryable failure. Numeric status codes (500, 502, etc.) are
+// handled separately by extractHTTPStatusCode + isRetryableStatusCode.
+var retryablePatterns = []string{
+	"timeout",               // Generic timeout
+	"connection reset",      // Connection reset
+	"connection refused",    // Connection refused
+	"no such host",          // DNS failure
+	"temporary failure",     // Temporary failure
+	"service unavailable",   // Service unavailable
+	"internal server error", // Server error
+	"bad gateway",           // Gateway error
+	"gateway timeout",       // Gateway timeout
+	"overloaded",            // Server overloaded
+	"overloaded_error",      // Server overloaded
+	"other side closed",     // Connection closed by peer
+	"fetch failed",          // Network fetch failure
+	"reset before headers",  // Connection reset before headers received
+	"upstream connect",      // Upstream connection error
+	"internal_error",        // HTTP/2 INTERNAL_ERROR (stream-level)
+}
+
+// nonRetryablePatterns contains error message substrings that indicate a
+// permanent/non-retryable failure. Numeric status codes (429, 401, etc.) are
+// handled separately by extractHTTPStatusCode.
+var nonRetryablePatterns = []string{
+	"rate limit",        // Rate limit message
+	"too many requests", // Rate limit message
+	"throttl",           // Throttling (rate limiting)
+	"quota",             // Quota exceeded
+	"capacity",          // Capacity issues (often rate-limit related)
+	"invalid",           // Invalid request
+	"unauthorized",      // Auth error
+	"authentication",    // Auth error
+	"api key",           // API key error
+}
+
+// isRetryableModelError determines if an error should trigger a retry of the SAME model.
+// It is used as a fallback by ClassifyModelError when no *StatusError is present.
 //
 // Retryable errors (retry same model with backoff):
 // - Network timeouts
@@ -238,7 +264,7 @@ func IsRetryableStatusCode(statusCode int) bool {
 //
 // The key distinction is: 429 means "you're calling too fast, slow down" which
 // suggests we should try a different model, not keep hammering the same one.
-func IsRetryableModelError(err error) bool {
+func isRetryableModelError(err error) bool {
 	if err == nil {
 		return false
 	}
@@ -257,8 +283,8 @@ func IsRetryableModelError(err error) bool {
 	}
 
 	// First, try to extract HTTP status code from known SDK error types
-	if statusCode := ExtractHTTPStatusCode(err); statusCode != 0 {
-		retryable := IsRetryableStatusCode(statusCode)
+	if statusCode := extractHTTPStatusCode(err); statusCode != 0 {
+		retryable := isRetryableStatusCode(statusCode)
 		slog.Debug("Classified error by status code",
 			"status_code", statusCode,
 			"retryable", retryable)
@@ -274,58 +300,13 @@ func IsRetryableModelError(err error) bool {
 		}
 	}
 
-	// Fall back to message-pattern matching for errors without structured status codes
 	errMsg := strings.ToLower(err.Error())
-
-	// Retryable patterns (5xx, timeout, network issues)
-	// NOTE: 429 is explicitly NOT in this list - we skip to next model for rate limits
-	retryablePatterns := []string{
-		"500",                   // Internal server error
-		"502",                   // Bad gateway
-		"503",                   // Service unavailable
-		"504",                   // Gateway timeout
-		"408",                   // Request timeout
-		"timeout",               // Generic timeout
-		"connection reset",      // Connection reset
-		"connection refused",    // Connection refused
-		"no such host",          // DNS failure
-		"temporary failure",     // Temporary failure
-		"service unavailable",   // Service unavailable
-		"internal server error", // Server error
-		"bad gateway",           // Gateway error
-		"gateway timeout",       // Gateway timeout
-		"overloaded",            // Server overloaded
-		"overloaded_error",      // Server overloaded
-		"other side closed",     // Connection closed by peer
-		"fetch failed",          // Network fetch failure
-		"reset before headers",  // Connection reset before headers received
-		"upstream connect",      // Upstream connection error
-		"internal_error",        // HTTP/2 INTERNAL_ERROR (stream-level)
-	}
 
 	for _, pattern := range retryablePatterns {
 		if strings.Contains(errMsg, pattern) {
 			slog.Debug("Matched retryable error pattern", "pattern", pattern)
 			return true
 		}
-	}
-
-	// Non-retryable patterns (skip to next model immediately)
-	nonRetryablePatterns := []string{
-		"429",               // Rate limit - skip to next model
-		"rate limit",        // Rate limit message
-		"too many requests", // Rate limit message
-		"throttl",           // Throttling (rate limiting)
-		"quota",             // Quota exceeded
-		"capacity",          // Capacity issues (often rate-limit related)
-		"401",               // Unauthorized
-		"403",               // Forbidden
-		"404",               // Not found
-		"400",               // Bad request
-		"invalid",           // Invalid request
-		"unauthorized",      // Auth error
-		"authentication",    // Auth error
-		"api key",           // API key error
 	}
 
 	for _, pattern := range nonRetryablePatterns {
@@ -340,10 +321,10 @@ func IsRetryableModelError(err error) bool {
 	return false
 }
 
-// ParseRetryAfterHeader parses a Retry-After header value.
+// parseRetryAfterHeader parses a Retry-After header value.
 // Supports both seconds (integer) and HTTP-date formats per RFC 7231 §7.1.3.
 // Returns 0 if the value is empty, invalid, or results in a non-positive duration.
-func ParseRetryAfterHeader(value string) time.Duration {
+func parseRetryAfterHeader(value string) time.Duration {
 	if value == "" {
 		return 0
 	}
@@ -397,58 +378,19 @@ func ClassifyModelError(err error) (retryable, rateLimited bool, retryAfter time
 		if statusErr.StatusCode == http.StatusTooManyRequests {
 			return false, true, statusErr.RetryAfter
 		}
-		return IsRetryableStatusCode(statusErr.StatusCode), false, 0
+		return isRetryableStatusCode(statusErr.StatusCode), false, 0
 	}
 
 	// Fallback: providers that don't yet wrap (e.g. Bedrock), or non-provider
 	// errors (network, pattern matching).
-	statusCode := ExtractHTTPStatusCode(err)
+	statusCode := extractHTTPStatusCode(err)
 	if statusCode == http.StatusTooManyRequests {
 		return false, true, 0 // No Retry-After without StatusError
 	}
 	if statusCode != 0 {
-		return IsRetryableStatusCode(statusCode), false, 0
+		return isRetryableStatusCode(statusCode), false, 0
 	}
-	return IsRetryableModelError(err), false, 0
-}
-
-// CalculateBackoff returns the backoff duration for a given attempt (0-indexed).
-// Uses exponential backoff with jitter.
-func CalculateBackoff(attempt int) time.Duration {
-	if attempt < 0 {
-		attempt = 0
-	}
-
-	// Calculate exponential delay
-	delay := float64(backoffBaseDelay)
-	for range attempt {
-		delay *= backoffFactor
-	}
-
-	// Cap at max delay
-	if delay > float64(backoffMaxDelay) {
-		delay = float64(backoffMaxDelay)
-	}
-
-	// Add jitter (±10%)
-	jitter := delay * backoffJitter * (2*rand.Float64() - 1)
-	delay += jitter
-
-	return time.Duration(delay)
-}
-
-// SleepWithContext sleeps for the specified duration, returning early if context is cancelled.
-// Returns true if the sleep completed, false if it was interrupted by context cancellation.
-func SleepWithContext(ctx context.Context, d time.Duration) bool {
-	timer := time.NewTimer(d)
-	defer timer.Stop()
-
-	select {
-	case <-timer.C:
-		return true
-	case <-ctx.Done():
-		return false
-	}
+	return isRetryableModelError(err), false, 0
 }
 
 // FormatError returns a user-friendly error message for model errors.

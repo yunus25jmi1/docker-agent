@@ -18,6 +18,7 @@ import (
 // fakeRerankingProvider implements provider.RerankingProvider for testing.
 type fakeRerankingProvider struct {
 	base.Config
+
 	scores []float64
 	err    error
 }

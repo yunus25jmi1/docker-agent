@@ -1,6 +1,7 @@
 package skills
 
 import (
+	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
@@ -13,11 +14,12 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/docker/docker-agent/pkg/remote"
 )
 
 type diskCache struct {
-	baseDir    string
-	httpClient *http.Client
+	baseDir string
 }
 
 type cacheMetadata struct {
@@ -29,9 +31,6 @@ type cacheMetadata struct {
 func newDiskCache(baseDir string) *diskCache {
 	return &diskCache{
 		baseDir: baseDir,
-		httpClient: &http.Client{
-			Timeout: 30 * time.Second,
-		},
 	}
 }
 
@@ -68,10 +67,14 @@ func (c *diskCache) Get(baseURL, skillName, filePath string) (string, bool) {
 
 // FetchAndStore downloads a file from the given URL and stores it in the cache.
 // It respects Cache-Control headers to determine expiry.
-func (c *diskCache) FetchAndStore(baseURL, skillName, filePath, fileURL string) (string, error) {
+func (c *diskCache) FetchAndStore(ctx context.Context, baseURL, skillName, filePath, fileURL string) (string, error) {
 	slog.Debug("Fetching remote skill file", "url", fileURL)
 
-	resp, err := c.httpClient.Get(fileURL)
+	httpClient := &http.Client{
+		Timeout:   30 * time.Second,
+		Transport: remote.NewTransport(ctx),
+	}
+	resp, err := httpClient.Get(fileURL)
 	if err != nil {
 		return "", fmt.Errorf("fetching %s: %w", fileURL, err)
 	}

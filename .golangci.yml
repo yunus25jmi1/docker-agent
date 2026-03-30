@@ -12,6 +12,7 @@ linters:
     - depguard
     - dogsled
     - durationcheck
+    - embeddedstructfieldcheck
     - errcheck
     - errname
     - errorlint
@@ -20,6 +21,7 @@ linters:
     - forbidigo
     - ginkgolinter
     - gocheckcompilerdirectives
+    - godoclint
     - gochecknoinits
     - gochecksumtype
     - gocritic
@@ -61,6 +63,9 @@ linters:
     - usetesting
     - whitespace
     - wastedassign
+    - bodyclose
+    - makezero
+    - sqlclosecheck
   settings:
     forbidigo:
       forbid:

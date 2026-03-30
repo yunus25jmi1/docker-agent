@@ -15,6 +15,7 @@ import (
 
 	"github.com/getkin/kin-openapi/openapi3"
 
+	"github.com/docker/docker-agent/pkg/remote"
 	"github.com/docker/docker-agent/pkg/tools"
 	"github.com/docker/docker-agent/pkg/upstream"
 	"github.com/docker/docker-agent/pkg/useragent"
@@ -70,7 +71,7 @@ func (t *OpenAPITool) fetchSpec(ctx context.Context) (*openapi3.T, error) {
 	req.Header.Set("Accept", "application/json")
 	setHeaders(req, t.headers)
 
-	resp, err := (&http.Client{Timeout: httpTimeout}).Do(req)
+	resp, err := (&http.Client{Timeout: httpTimeout, Transport: remote.NewTransport(ctx)}).Do(req)
 	if err != nil {
 		return nil, fmt.Errorf("request failed: %w", err)
 	}
@@ -398,7 +399,7 @@ func (h *openAPIHandler) callTool(ctx context.Context, params openAPICallArgs) (
 	req.Header.Set("Accept", "application/json")
 	setHeaders(req, h.headers)
 
-	resp, err := (&http.Client{Timeout: httpTimeout}).Do(req)
+	resp, err := (&http.Client{Timeout: httpTimeout, Transport: remote.NewTransport(ctx)}).Do(req)
 	if err != nil {
 		return nil, fmt.Errorf("request failed: %w", err)
 	}

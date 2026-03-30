@@ -303,6 +303,7 @@ func TestSimulatedStreamCopy_SSEEvents(t *testing.T) {
 // notifyWriter wraps an http.ResponseWriter and signals on first Write.
 type notifyWriter struct {
 	http.ResponseWriter
+
 	notify   chan struct{}
 	notified bool
 }

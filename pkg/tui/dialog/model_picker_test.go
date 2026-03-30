@@ -348,35 +348,19 @@ func TestValidateCustomModelSpec(t *testing.T) {
 func TestIsValidProvider(t *testing.T) {
 	t.Parallel()
 
-	tests := []struct {
-		provider string
-		want     bool
-	}{
-		{"openai", true},
-		{"anthropic", true},
-		{"google", true},
-		{"dmr", true},
-		{"mistral", true},
-		{"xai", true},
-		{"nebius", true},
-		{"ollama", true},
-		{"azure", true},
-		{"requesty", true},
-		{"minimax", true},
-		{"OPENAI", true}, // case insensitive
-		{"OpenAI", true}, // case insensitive
-		{"unknown", false},
-		{"foo", false},
-		{"", false},
+	// All known providers (core + aliases) should be valid
+	for _, name := range provider.AllProviders() {
+		assert.True(t, provider.IsKnownProvider(name), "provider %s should be known", name)
 	}
 
-	for _, tt := range tests {
-		t.Run(tt.provider, func(t *testing.T) {
-			t.Parallel()
-			got := provider.IsKnownProvider(tt.provider)
-			assert.Equal(t, tt.want, got)
-		})
-	}
+	// Case-insensitive
+	assert.True(t, provider.IsKnownProvider("OPENAI"))
+	assert.True(t, provider.IsKnownProvider("OpenAI"))
+
+	// Unknown providers
+	assert.False(t, provider.IsKnownProvider("unknown"))
+	assert.False(t, provider.IsKnownProvider("foo"))
+	assert.False(t, provider.IsKnownProvider(""))
 }
 
 func TestModelPickerSortingWithCatalog(t *testing.T) {

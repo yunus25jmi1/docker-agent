@@ -17,6 +17,7 @@ import (
 
 type GatewayToolset struct {
 	*Toolset
+
 	cleanUp func() error
 }
 

@@ -116,18 +116,6 @@ func New(ctx context.Context, rt runtime.Runtime, sess *session.Session, opts ..
 		}
 	}()
 
-	// If the runtime supports background RAG initialization, start it
-	// and forward events to the TUI. Remote runtimes typically handle RAG server-side
-	// and won't implement this optional interface.
-	if ragRuntime, ok := rt.(runtime.RAGInitializer); ok {
-		go ragRuntime.StartBackgroundRAGInit(ctx, func(event runtime.Event) {
-			select {
-			case app.events <- event:
-			case <-ctx.Done():
-			}
-		})
-	}
-
 	// Subscribe to tool list changes so the sidebar updates immediately
 	// when an MCP server adds or removes tools (outside of a RunStream).
 	if tcs, ok := rt.(runtime.ToolsChangeSubscriber); ok {
@@ -177,6 +165,11 @@ func (a *App) SendFirstMessage() tea.Cmd {
 	}
 
 	return tea.Sequence(cmds...)
+}
+
+// CurrentAgentTools returns the tools available to the current agent.
+func (a *App) CurrentAgentTools(ctx context.Context) ([]tools.Tool, error) {
+	return a.runtime.CurrentAgentTools(ctx)
 }
 
 // CurrentAgentCommands returns the commands for the active agent
@@ -552,12 +545,11 @@ func (a *App) NewSession() {
 		a.cancel()
 		a.cancel = nil
 	}
-	// Preserve user-controlled session flags (like /think toggle)
+	// Preserve user-controlled session flags
 	// so they don't reset to default on /new
 	var opts []session.Opt
 	if a.session != nil {
 		opts = append(opts,
-			session.WithThinking(a.session.Thinking),
 			session.WithToolsApproved(a.session.ToolsApproved),
 			session.WithHideToolResults(a.session.HideToolResults),
 			session.WithWorkingDir(a.session.WorkingDir),
@@ -567,6 +559,30 @@ func (a *App) NewSession() {
 	// Clear first message so it won't be re-sent on re-init
 	a.firstMessage = nil
 	a.firstMessageAttach = ""
+
+	// Re-emit startup info so the sidebar shows agent/tools info in the new session
+	a.reEmitStartupInfo(context.Background())
+}
+
+// reEmitStartupInfo resets and re-emits startup info (agent, team, tools)
+// through the events channel so the sidebar updates.
+func (a *App) reEmitStartupInfo(ctx context.Context) {
+	a.runtime.ResetStartupInfo()
+	go func() {
+		startupEvents := make(chan runtime.Event, 10)
+		go func() {
+			defer close(startupEvents)
+			a.runtime.EmitStartupInfo(ctx, a.session, startupEvents)
+		}()
+		for event := range startupEvents {
+			select {
+			case a.events <- event:
+			case <-ctx.Done():
+				return
+			default:
+			}
+		}
+	}()
 }
 
 func (a *App) Session() *session.Session {
@@ -667,21 +683,7 @@ func (a *App) SetCurrentAgentModel(ctx context.Context, modelRef string) error {
 	}
 
 	// Re-emit startup info so the sidebar updates with the new model
-	a.runtime.ResetStartupInfo()
-	go func() {
-		startupEvents := make(chan runtime.Event, 10)
-		go func() {
-			defer close(startupEvents)
-			a.runtime.EmitStartupInfo(ctx, a.session, startupEvents)
-		}()
-		for event := range startupEvents {
-			select {
-			case a.events <- event:
-			case <-ctx.Done():
-				return
-			}
-		}
-	}()
+	a.reEmitStartupInfo(ctx)
 
 	return nil
 }
@@ -841,21 +843,7 @@ func (a *App) ReplaceSession(ctx context.Context, sess *session.Session) {
 	a.applySessionModelOverrides(ctx, sess)
 
 	// Reset and re-emit startup info so the sidebar shows agent/tools info
-	a.runtime.ResetStartupInfo()
-	go func() {
-		startupEvents := make(chan runtime.Event, 10)
-		go func() {
-			defer close(startupEvents)
-			a.runtime.EmitStartupInfo(ctx, a.session, startupEvents)
-		}()
-		for event := range startupEvents {
-			select {
-			case a.events <- event:
-			case <-ctx.Done():
-				return
-			}
-		}
-	}()
+	a.reEmitStartupInfo(ctx)
 }
 
 // applySessionModelOverrides applies any stored model overrides from a loaded session.
@@ -1039,11 +1027,11 @@ func (a *App) ExportHTML(ctx context.Context, filename string) (string, error) {
 	return export.SessionToFile(a.session, agentInfo.Description, filename)
 }
 
-// UpdateSessionTitle updates the current session's title and persists it.
-// It works with both local and remote runtimes.
 // ErrTitleGenerating is returned when attempting to set a title while generation is in progress.
 var ErrTitleGenerating = errors.New("title generation in progress, please wait")
 
+// UpdateSessionTitle updates the current session's title and persists it.
+// It works with both local and remote runtimes.
 func (a *App) UpdateSessionTitle(ctx context.Context, title string) error {
 	if a.session == nil {
 		return errors.New("no active session")

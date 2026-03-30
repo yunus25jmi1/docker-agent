@@ -50,6 +50,7 @@ const (
 // It implements the provider.Provider interface
 type Client struct {
 	base.Config
+
 	client     openai.Client
 	baseURL    string
 	httpClient *http.Client

@@ -89,6 +89,11 @@ type Message struct {
 	// Cost is the cost of this message in dollars (only set for assistant messages)
 	Cost float64 `json:"cost,omitempty"`
 
+	// FinishReason indicates why the model stopped generating for this message.
+	// "stop" = natural end, "tool_calls" = tool invocation, "length" = token limit.
+	// Only set for assistant messages.
+	FinishReason FinishReason `json:"finish_reason,omitempty"`
+
 	// CacheControl indicates whether this message is a cached message (only used by anthropic)
 	CacheControl bool `json:"cache_control,omitempty"`
 }
