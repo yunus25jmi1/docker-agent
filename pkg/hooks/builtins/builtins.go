@@ -51,8 +51,10 @@ package builtins
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 
+	"github.com/docker/docker-agent/pkg/config/latest"
 	"github.com/docker/docker-agent/pkg/hooks"
 )
 
@@ -119,6 +121,7 @@ func Register(r *hooks.Registry) (*State, error) {
 		r.RegisterBuiltin(MaxIterations, state.maxIterations.hook),
 		r.RegisterBuiltin(Snapshot, state.snapshot.hook),
 		r.RegisterBuiltin(RedactSecrets, redactSecrets),
+		r.RegisterBuiltin(HandleLargeToolOutput, handleLargeToolOutput),
 		r.RegisterBuiltin(HTTPPost, httpPost),
 	); err != nil {
 		return nil, err
@@ -127,7 +130,7 @@ func Register(r *hooks.Registry) (*State, error) {
 }
 
 // AgentDefaults captures defaults that map onto stock builtin hook entries.
-// Pass each AgentConfig.AddXxx flag as-is; Snapshot comes from runtime/global config.
+// Pass each AgentConfig.AddXxx flag as-as; Snapshot comes from runtime/global config.
 type AgentDefaults struct {
 	AddDate            bool
 	AddEnvironmentInfo bool
@@ -143,6 +146,10 @@ type AgentDefaults struct {
 	// turn boundaries. session_end is included to garbage-collect the
 	// shadow repository; undo history remains available after a response stops.
 	Snapshot bool
+	// HandleLargeToolOutput auto-injects the handle_large_tool_output
+	// builtin under tool_response_transform when configured. Tool responses
+	// exceeding the threshold are saved to disk and replaced with a pointer.
+	HandleLargeToolOutput *latest.HandleLargeToolOutputConfig
 }
 
 // ApplyAgentDefaults appends the stock builtin hook entries implied by
@@ -183,6 +190,13 @@ func ApplyAgentDefaults(cfg *hooks.Config, d AgentDefaults) *hooks.Config {
 		cfg.ToolResponseTransform = append(cfg.ToolResponseTransform, hooks.MatcherConfig{
 			Matcher: "*",
 			Hooks:   []hooks.Hook{builtinHook(RedactSecrets)},
+		})
+	}
+	if d.HandleLargeToolOutput != nil && d.HandleLargeToolOutput.Enabled {
+		cfgBytes, _ := json.Marshal(d.HandleLargeToolOutput)
+		cfg.ToolResponseTransform = append(cfg.ToolResponseTransform, hooks.MatcherConfig{
+			Matcher: "*",
+			Hooks:   []hooks.Hook{builtinHook(HandleLargeToolOutput, string(cfgBytes))},
 		})
 	}
 	if cfg.IsEmpty() {

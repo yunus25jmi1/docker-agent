@@ -33,11 +33,12 @@ func (r *LocalRuntime) buildHooksExecutors() {
 			continue
 		}
 		cfg := builtins.ApplyAgentDefaults(a.Hooks(), builtins.AgentDefaults{
-			AddDate:            a.AddDate(),
-			AddEnvironmentInfo: a.AddEnvironmentInfo(),
-			AddPromptFiles:     a.AddPromptFiles(),
-			RedactSecrets:      a.RedactSecrets(),
-			Snapshot:           r.snapshotsEnabled,
+			AddDate:               a.AddDate(),
+			AddEnvironmentInfo:    a.AddEnvironmentInfo(),
+			AddPromptFiles:        a.AddPromptFiles(),
+			RedactSecrets:         a.RedactSecrets(),
+			Snapshot:              r.snapshotsEnabled,
+			HandleLargeToolOutput: a.HandleLargeToolOutput(),
 		})
 		cfg = applyCacheDefault(cfg, a)
 		if cfg == nil {
